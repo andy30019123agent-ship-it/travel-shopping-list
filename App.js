@@ -196,8 +196,8 @@ export default function App() {
 
 const C = {
   bg: '#f7f6f3', card: '#ffffff', border: '#ebe8e2',
-  text: '#1f1f1d', muted: '#9a978f', accent: '#0f766e',
-  accentSoft: '#e6f1ef', green: '#15803d',
+  text: '#1f1f1d', muted: '#9a978f', accent: '#e25a92',
+  accentSoft: '#fce8f1', green: '#c24d86',
 };
 
 const styles = StyleSheet.create({
