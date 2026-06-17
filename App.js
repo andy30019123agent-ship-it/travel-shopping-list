@@ -625,7 +625,7 @@ export default function App() {
 
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
             {todoItems.length === 0 && (
-              <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="bag-handle-outline" size={40} color={C.rose} /></View><Text style={styles.emptyBig}>清單還是空的</Text><Text style={styles.empty}>打商品名／綽號、貼商品網址，或用右上「AI 產品辨識」拍照{'\n'}加好後按「查價」，幫你比當地價、即時換算台幣 💰</Text></View>
+              <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="bag-handle-outline" size={40} color={C.rose} /></View><Text style={styles.emptyBig}>清單還是空的</Text><Text style={styles.empty}>打上商品名稱，或用右上「AI 產品辨識」拍照{'\n'}加好後按「查價」，幫你比當地價、即時換算台幣 💰</Text></View>
             )}
             {todoCards}
           </ScrollView>
