@@ -1,0 +1,7 @@
+name = "menshui-price"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+
+# Workers AI 綁定（用來把中文商品名翻成日文/韓文）
+[ai]
+binding = "AI"

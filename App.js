@@ -1,36 +1,88 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  SafeAreaView, View, Text, TextInput, TouchableOpacity,
-  ScrollView, StyleSheet, StatusBar, Platform,
+  SafeAreaView, View, Text, TextInput, TouchableOpacity, Image,
+  ScrollView, StyleSheet, StatusBar, Platform, ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 
 const STORE_KEY = 'travel-shopping-list-v1';
+const WORKER_URL = 'https://menshui-price.andy30019123agent.workers.dev';
+const RAKUTEN_APP_ID = '3ec6041d-d772-4a05-861a-9d15ec64dafa';
+const RAKUTEN_ACCESS_KEY = 'pk_SuWs3ZCwNcFZS14BLH8QbOcDkOOBMKlyDRp7L3a2ANN';
 
-// 匯率（示範用，之後接真實匯率 API）
-const RATES = { jpy: 0.215, krw: 0.0234 };
 const CURRENCY = {
-  jp: { code: 'jpy', symbol: '¥', flag: '🇯🇵', label: '日本' },
-  kr: { code: 'krw', symbol: '₩', flag: '🇰🇷', label: '韓國' },
+  jp: { flag: '🇯🇵', label: '日本' },
+  kr: { flag: '🇰🇷', label: '韓國' },
 };
 
-// 假價格：之後換成樂天 / Naver 真實資料
-function fakePrice(name, country) {
-  const seed = [...name].reduce((s, c) => s + c.charCodeAt(0), 0);
-  const unit = country === 'jp' ? 60 : 700;
-  const median = unit * (3 + (seed % 18));
-  const min = Math.round(median * 0.82);
-  const max = Math.round(median * 1.24);
-  return { min, max, median, currency: CURRENCY[country].code };
-}
+const fmt = n => (n == null ? '' : n.toLocaleString('en-US'));
+const median = arr => {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+};
+// 濾掉整箱/批發/配件的離群值，取「典型單盒價」
+const typicalPrices = prices => {
+  const v = prices.filter(p => p > 0).sort((a, b) => a - b);
+  if (v.length < 3) return v;
+  const med = median(v);
+  return v.filter(p => p >= med * 0.4 && p <= med * 2.2);
+};
 
-const fmt = n => n.toLocaleString('en-US');
-const toTWD = (amount, code) => Math.round(amount * RATES[code]);
+async function fetchPriceFor(item) {
+  const q = item.term
+    ? `term=${encodeURIComponent(item.term)}`
+    : `item=${encodeURIComponent(item.name)}`;
+  const res = await fetch(`${WORKER_URL}/price?country=${item.country}&${q}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || '查詢失敗');
+
+  if (item.country === 'kr') {
+    return {
+      term: data.term,
+      image: item.imageManual ? item.image : (data.image || item.image),
+      price: data.typical
+        ? { typical: data.typical, min: data.min, max: data.max, twd: data.twd, currency: data.currency, count: data.count }
+        : null,
+    };
+  }
+
+  // 日本：用翻譯詞由前端直接查樂天（瀏覽器自帶 Referer 才過得了）
+  const term = data.term;
+  const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
+    `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}` +
+    `&keyword=${encodeURIComponent(term)}&hits=30&format=json`;
+  const rk = await fetch(url);
+  if (!rk.ok) throw new Error(`樂天查詢失敗 (${rk.status})`);
+  const rj = await rk.json();
+  const items = (rj.Items || []).map(x => x.Item || x);
+  const prices = items.map(i => i.itemPrice).filter(p => p > 0);
+  const typ = typicalPrices(prices);
+  if (!typ.length) return { term, image: item.image, price: null };
+  const typical = median(typ);
+  let image = item.imageManual ? item.image : '';
+  if (!item.imageManual) {
+    let best = Infinity;
+    for (const i of items) {
+      const p = i.itemPrice;
+      const img = i.mediumImageUrls?.[0]?.imageUrl || i.smallImageUrls?.[0]?.imageUrl;
+      if (p > 0 && img && Math.abs(p - typical) < best) { best = Math.abs(p - typical); image = img; }
+    }
+  }
+  return {
+    term,
+    image,
+    price: { typical, min: typ[0], max: typ[typ.length - 1], twd: Math.round(typical * (data.rate || 0.21)), currency: '¥', count: typ.length },
+  };
+}
 
 export default function App() {
   const [items, setItems] = useState([]);
   const [input, setInput] = useState('');
   const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState({});
 
   useEffect(() => {
     AsyncStorage.getItem(STORE_KEY).then(raw => {
@@ -42,31 +94,56 @@ export default function App() {
     if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items));
   }, [items, loaded]);
 
+  const update = (id, patch) =>
+    setItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
+  const remove = id => setItems(prev => prev.filter(it => it.id !== id));
+
   const addItem = () => {
     const name = input.trim();
     if (!name) return;
     setItems(prev => [
-      { id: Date.now().toString(), name, country: 'jp', qty: 1, note: '', purchased: false, price: null },
+      { id: Date.now().toString(), name, country: 'jp', qty: 1, note: '', term: '', image: '', imageManual: false, purchased: false, price: null },
       ...prev,
     ]);
     setInput('');
   };
 
-  const update = (id, patch) =>
-    setItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
-  const remove = id => setItems(prev => prev.filter(it => it.id !== id));
+  async function queryOne(item) {
+    setBusy(b => ({ ...b, [item.id]: true }));
+    try {
+      const r = await fetchPriceFor(item);
+      update(item.id, { ...r, noResult: !r.price });
+    } catch (e) {
+      update(item.id, { price: null });
+      setBusy(b => ({ ...b, [item.id]: 'err' }));
+      setTimeout(() => setBusy(b => ({ ...b, [item.id]: false })), 2500);
+      return;
+    }
+    setBusy(b => ({ ...b, [item.id]: false }));
+  }
 
-  const refreshOne = id =>
-    setItems(prev => prev.map(it =>
-      it.id === id ? { ...it, price: fakePrice(it.name, it.country) } : it));
-  const refreshAll = () =>
-    setItems(prev => prev.map(it => ({ ...it, price: fakePrice(it.name, it.country) })));
+  async function queryAll() {
+    for (const it of items) {
+      // 用最新的 item 內容
+      // eslint-disable-next-line no-await-in-loop
+      await queryOne(it);
+    }
+  }
+
+  async function pickImage(id) {
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
+      if (!res.canceled && res.assets?.[0]) {
+        update(id, { image: res.assets[0].uri, imageManual: true });
+      }
+    } catch (e) { /* 使用者取消或不支援 */ }
+  }
 
   const totals = useMemo(() => {
     let todo = 0, done = 0;
     for (const it of items) {
       if (!it.price) continue;
-      const t = toTWD(it.price.median, it.price.currency) * it.qty;
+      const t = it.price.twd * it.qty;
       if (it.purchased) done += t; else todo += t;
     }
     return { todo, done };
@@ -77,7 +154,7 @@ export default function App() {
       <StatusBar barStyle="dark-content" />
       <View style={styles.header}>
         <Text style={styles.title}>免稅不是免費</Text>
-        <Text style={styles.sub}>出國購物清單 ・ 日本 / 韓國</Text>
+        <Text style={styles.sub}>出國購物清單 ・ 日本 / 韓國 ・ 即時參考價</Text>
       </View>
 
       <View style={styles.addBar}>
@@ -96,8 +173,8 @@ export default function App() {
       </View>
 
       {items.length > 0 && (
-        <TouchableOpacity style={styles.refreshAll} onPress={refreshAll}>
-          <Text style={styles.refreshAllTxt}>↻ 全部重整價格</Text>
+        <TouchableOpacity style={styles.refreshAll} onPress={queryAll}>
+          <Text style={styles.refreshAllTxt}>↻ 全部查價</Text>
         </TouchableOpacity>
       )}
 
@@ -107,6 +184,7 @@ export default function App() {
         )}
         {items.map(it => {
           const cur = CURRENCY[it.country];
+          const state = busy[it.id];
           return (
             <View key={it.id} style={[styles.card, it.purchased && styles.cardDone]}>
               <View style={styles.rowTop}>
@@ -117,6 +195,13 @@ export default function App() {
                 >
                   <Text style={styles.checkTxt}>{it.purchased ? '✓' : ''}</Text>
                 </TouchableOpacity>
+
+                <TouchableOpacity style={styles.thumbWrap} onPress={() => pickImage(it.id)}>
+                  {it.image
+                    ? <Image source={{ uri: it.image }} style={styles.thumb} />
+                    : <Text style={styles.thumbPlus}>📷</Text>}
+                </TouchableOpacity>
+
                 <Text style={[styles.name, it.purchased && styles.nameDone]}>{it.name}</Text>
                 <TouchableOpacity onPress={() => remove(it.id)} hitSlop={8}>
                   <Text style={styles.del}>✕</Text>
@@ -125,18 +210,31 @@ export default function App() {
 
               <TextInput
                 style={styles.note}
-                placeholder="📝 備註，例如：給媽媽 / 要無香料款 / 比台灣便宜再買"
+                placeholder="📝 備註，例如：給媽媽 / 要無香料款"
                 placeholderTextColor="#bdbab2"
                 value={it.note}
                 onChangeText={t => update(it.id, { note: t })}
               />
+
+              {(it.term || it.price) ? (
+                <View style={styles.termRow}>
+                  <Text style={styles.termLabel}>🔍</Text>
+                  <TextInput
+                    style={styles.termInput}
+                    value={it.term}
+                    placeholder="翻譯後的搜尋字（可改）"
+                    placeholderTextColor="#bdbab2"
+                    onChangeText={t => update(it.id, { term: t })}
+                  />
+                </View>
+              ) : null}
 
               <View style={styles.rowMid}>
                 <View style={styles.seg}>
                   {['jp', 'kr'].map(c => (
                     <TouchableOpacity key={c}
                       style={[styles.segBtn, it.country === c && styles.segBtnOn]}
-                      onPress={() => update(it.id, { country: c, price: null })}
+                      onPress={() => update(it.id, { country: c, term: '', price: null, noResult: false, image: it.imageManual ? it.image : '' })}
                     >
                       <Text style={[styles.segTxt, it.country === c && styles.segTxtOn]}>
                         {CURRENCY[c].flag} {CURRENCY[c].label}
@@ -158,21 +256,33 @@ export default function App() {
               </View>
 
               <View style={styles.rowBot}>
-                {it.price ? (
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.priceRange}>
-                      {cur.symbol}{fmt(it.price.min)}–{cur.symbol}{fmt(it.price.max)}
-                    </Text>
-                    <Text style={styles.priceMed}>
-                      中位 {cur.symbol}{fmt(it.price.median)}
-                      <Text style={styles.twd}>　約 NT${fmt(toTWD(it.price.median, it.price.currency))}</Text>
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.noPrice}>尚未查價</Text>
-                )}
-                <TouchableOpacity style={styles.refreshBtn} onPress={() => refreshOne(it.id)}>
-                  <Text style={styles.refreshBtnTxt}>↻ 查價</Text>
+                <View style={{ flex: 1 }}>
+                  {it.price ? (
+                    <>
+                      <Text style={styles.priceMed}>
+                        常見價 {it.price.currency}{fmt(it.price.typical)}
+                        <Text style={styles.twd}>　約 NT${fmt(it.price.twd)}</Text>
+                      </Text>
+                      <Text style={styles.priceRange}>
+                        範圍 {it.price.currency}{fmt(it.price.min)}–{it.price.currency}{fmt(it.price.max)} ・ {it.price.count} 筆
+                      </Text>
+                    </>
+                  ) : state === 'err' ? (
+                    <Text style={styles.errTxt}>連線出錯，請再按一次查價</Text>
+                  ) : it.noResult ? (
+                    <Text style={styles.errTxt}>查無結果 — 改上面 🔍 搜尋字再查</Text>
+                  ) : (
+                    <Text style={styles.noPrice}>尚未查價</Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={[styles.refreshBtn, state === true && styles.refreshBtnBusy]}
+                  disabled={state === true}
+                  onPress={() => queryOne(it)}
+                >
+                  {state === true
+                    ? <ActivityIndicator size="small" color="#e25a92" />
+                    : <Text style={styles.refreshBtnTxt}>↻ 查價</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -204,7 +314,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg, paddingTop: Platform.OS === 'android' ? 28 : 0 },
   header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 14 },
   title: { color: C.text, fontSize: 26, fontWeight: '800', letterSpacing: 1 },
-  sub: { color: C.muted, fontSize: 13, marginTop: 4, letterSpacing: 0.5 },
+  sub: { color: C.muted, fontSize: 13, marginTop: 4, letterSpacing: 0.3 },
 
   addBar: { flexDirection: 'row', paddingHorizontal: 20, gap: 8 },
   addInput: {
@@ -226,10 +336,13 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 1,
   },
   cardDone: { backgroundColor: '#fbfaf8', opacity: 0.7 },
-  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 2, borderColor: '#d6d3cc', alignItems: 'center', justifyContent: 'center' },
   checkOn: { backgroundColor: C.green, borderColor: C.green },
   checkTxt: { color: '#fff', fontWeight: '900', fontSize: 15 },
+  thumbWrap: { width: 46, height: 46, borderRadius: 10, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  thumb: { width: 46, height: 46 },
+  thumbPlus: { fontSize: 18, opacity: 0.5 },
   name: { flex: 1, color: C.text, fontSize: 17, fontWeight: '700' },
   nameDone: { textDecorationLine: 'line-through', color: C.muted },
   del: { color: '#c2bfb7', fontSize: 16, paddingHorizontal: 2 },
@@ -238,6 +351,9 @@ const styles = StyleSheet.create({
     marginTop: 10, backgroundColor: C.bg, borderRadius: 10, paddingHorizontal: 12,
     paddingVertical: 9, fontSize: 14, color: C.text, borderWidth: 1, borderColor: C.border,
   },
+  termRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  termLabel: { fontSize: 14 },
+  termInput: { flex: 1, backgroundColor: C.accentSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, fontSize: 14, color: C.text },
 
   rowMid: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
   seg: { flexDirection: 'row', backgroundColor: C.bg, borderRadius: 9, padding: 3, borderWidth: 1, borderColor: C.border },
@@ -250,12 +366,14 @@ const styles = StyleSheet.create({
   qtyBtnTxt: { color: C.text, fontSize: 17, fontWeight: '700' },
   qtyNum: { color: C.text, fontSize: 16, fontWeight: '700', minWidth: 22, textAlign: 'center' },
 
-  rowBot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 11 },
-  priceRange: { color: C.text, fontSize: 16, fontWeight: '700' },
-  priceMed: { color: C.muted, fontSize: 13, marginTop: 2 },
+  rowBot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 11, gap: 10 },
+  priceMed: { color: C.text, fontSize: 16, fontWeight: '700' },
   twd: { color: C.accent, fontWeight: '800' },
+  priceRange: { color: C.muted, fontSize: 12, marginTop: 2 },
   noPrice: { color: '#bdbab2', fontSize: 14, fontStyle: 'italic' },
-  refreshBtn: { backgroundColor: C.accentSoft, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 8 },
+  errTxt: { color: '#c2557a', fontSize: 13 },
+  refreshBtn: { backgroundColor: C.accentSoft, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 8, minWidth: 64, alignItems: 'center' },
+  refreshBtnBusy: { opacity: 0.7 },
   refreshBtnTxt: { color: C.accent, fontWeight: '700', fontSize: 13 },
 
   footer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 22, paddingVertical: 15, borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.card },
