@@ -35,6 +35,18 @@ const JP_DICT = {
   '魔法瓶': 'サーモス', '保溫瓶': 'サーモス', '雪肌精': '雪肌精', '極潤': '肌研 極潤',
   '牛乳石鹼': '牛乳石鹸', '碧柔': 'ビオレ', '洗顏專科': '専科 洗顔',
   '液體絆創膏': '液体絆創膏', '液體OK繃': '液体絆創膏',
+  // DHC 保健食品（台灣遊客熱門，「精華/萃取」日文不用「精華」一詞）
+  'DHC藍莓': 'DHC ブルーベリー', 'DHC藍莓精華': 'DHC ブルーベリー', 'DHC藍莓萃取': 'DHC ブルーベリー',
+  'DHC維他命C': 'DHC ビタミンC', 'DHC維生素C': 'DHC ビタミンC', 'DHC維他命B群': 'DHC ビタミンBミックス',
+  'DHC維他命E': 'DHC ビタミンE', 'DHC葉黃素': 'DHC ルテイン', 'DHC膠原蛋白': 'DHC コラーゲン',
+  'DHC魚油': 'DHC DHA', 'DHCDHA': 'DHC DHA', 'DHC鋅': 'DHC 亜鉛', 'DHC鈣': 'DHC カルシウム',
+  'DHC鐵': 'DHC ヘム鉄', 'DHC玻尿酸': 'DHC ヒアルロン酸', 'DHC輔酶Q10': 'DHC コエンザイムQ10',
+  'DHC大豆異黃酮': 'DHC 大豆イソフラボン', 'DHC綜合維他命': 'DHC マルチビタミン',
+  'DHC燃燒': 'DHC フォースコリー', 'DHC瘦身': 'DHC フォースコリー', 'DHC護唇膏': 'DHC 薬用リップクリーム',
+  // 常見保健食品通用詞（保健食品用成分名，不加「精華」）
+  '葉黃素': 'ルテイン サプリ', '膠原蛋白': 'コラーゲン サプリ', '蝦紅素': 'アスタキサンチン',
+  '藍莓精華': 'ブルーベリー サプリ', '深海魚油': 'DHA EPA サプリ', '輔酶Q10': 'コエンザイムQ10',
+  '波斯菊葉黃素': 'ルテイン', '善存': 'マルチビタミン',
 };
 const KR_DICT = {
   '雪花秀': '설화수', '后': '더 후 Whoo', '愛茉莉': '아모레퍼시픽', '正官庄': '정관장',
@@ -88,6 +100,21 @@ function dictLookup(dict, input) {
   return best;
 }
 
+// OpenAI Chat（文字或含圖片的 content），失敗回 null 讓呼叫端退回免費模型
+async function openaiChat(env, content, max_tokens = 50) {
+  if (!env.OPENAI_API_KEY) return null;
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content }], max_tokens, temperature: 0 }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j.choices?.[0]?.message?.content || '').trim() || null;
+  } catch { return null; }
+}
+
 // AI：把中文商品名翻成當地語言的搜尋關鍵字（候選來自搜尋結果，不必多個關鍵字）
 async function guessTerms(env, item, country) {
   // 先查對照表（含容錯），命中就不必呼叫 AI
@@ -102,19 +129,24 @@ async function guessTerms(env, item, country) {
     `The input may be a formal name, a brand, a Taiwanese nickname/slang, a Taiwanese transliteration, ` +
     `an English/romanized brand name, OR contain typos (e.g. "小護士"=メンソレータム, "魔法瓶"=サーモス, ` +
     `"合利他命"=アリナミン, 韓國"后"=Whoo, "numbuzin/數字面膜"=넘버즈인, "Torriden"=토리든, "Anua"=아누아, "Rejuran"=리쥬란). ` +
-    `These are often trendy/popular cosmetics or drugstore items. Convert English/romanized brand names to the correct local script. ` +
+    `These are often trendy/popular cosmetics, drugstore, or health-supplement items. ` +
+    `IMPORTANT: Keep well-known Latin/English brand names in their ORIGINAL Latin spelling (e.g. SENKA, DHC, KOSE, CANMAKE, Bioré, SK-II, Cetaphil) — do NOT phonetically transliterate a brand into kana/Hangul (NOT センクア). Only convert a brand when it has a real official local name (e.g. 資生堂, 雪花秀=설화수). Translate the product-type words into local script. ` +
+    (country === 'kr' ? '' : `For health supplements (保健食品/サプリ), translate the INGREDIENT and do NOT keep the cosmetic word "精華"; supplements use the ingredient name or エキス (e.g. 藍莓精華=ブルーベリー, 葉黃素=ルテイン, 維他命C=ビタミンC, 膠原蛋白=コラーゲン, 魚油=DHA). `) +
     `Correct obvious typos, identify the actual (popular) product, then give the single best ${lang} search keyword ` +
     `used on ${lang} shopping sites to find that product. ` +
     `${hint} Use the real local brand/product name, not a literal character-by-character translation. ` +
     `Reply with ONLY the keyword — no quotes, no romaji, no explanation.\n\nProduct: ${item}`;
+  const clean = s => (s || '').trim().split('\n')[0].replace(/^["「『]|["」』]$/g, '').trim();
+  // 先用 OpenAI（較準），失敗或無金鑰再退回 Workers AI llama
+  const oa = await openaiChat(env, prompt, 40);
+  if (oa) return [clean(oa) || item];
   try {
     const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 40,
       temperature: 0,
     });
-    const t = (r.response || '').trim().split('\n')[0].replace(/^["「『]|["」』]$/g, '').trim();
-    return [t || item];
+    return [clean(r.response) || item];
   } catch {
     return [item];
   }
@@ -130,7 +162,13 @@ async function extractFromUrl(url) {
   try {
     const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenshuiBot/1.0)' } });
     if (!r.ok) return {};
-    const html = await r.text();
+    // 日本網站常用 Shift_JIS / EUC-JP，需依 charset 正確解碼，否則標題會變亂碼
+    const buf = await r.arrayBuffer();
+    let cs = (r.headers.get('content-type') || '').match(/charset=["']?([\w-]+)/i)?.[1];
+    if (!cs) cs = new TextDecoder('latin1').decode(buf.slice(0, 4096)).match(/charset=["']?([\w-]+)/i)?.[1];
+    cs = (cs || 'utf-8').toLowerCase().replace('shift_jis', 'shift-jis');
+    let html;
+    try { html = new TextDecoder(cs).decode(buf); } catch { html = new TextDecoder('utf-8').decode(buf); }
     let title = metaContent(html, 'og:title');
     if (!title) { const t = html.match(/<title[^>]*>([^<]+)/i); if (t) title = t[1].replace(/&amp;/g, '&').trim(); }
     title = title.split(/\s*[|｜\-–—]\s*/)[0].trim();
@@ -188,16 +226,36 @@ export default {
       try {
         const body = await request.json();
         const b64 = (body.image || '').replace(/^data:image\/\w+;base64,/, '');
-        const bin = atob(b64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const r = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
-          image: [...bytes],
-          prompt: 'This is a product a tourist wants to buy. Identify the product and brand. Reply with ONLY the product/brand name (read any visible text/logo on the package), no description.',
-          max_tokens: 40,
-        });
-        const name = (r.description || r.response || '').trim().split('\n')[0].slice(0, 60);
-        return json({ ok: true, name });
+        let name = '', info = '', usage = '';
+        // 先用 OpenAI gpt-4o-mini 視覺辨識（較準），回 JSON {name, info, usage}
+        const oa = await openaiChat(env, [
+          { type: 'text', text: '這是台灣遊客想買的商品照片。讀出包裝上的文字/logo 辨識商品，只回 JSON：{"name":"商品最常見的搜尋名稱(品牌+品名，繁體中文或當地語言皆可)","info":"產品介紹：這是什麼、品牌定位與特色賣點(繁體中文，約60字)","usage":"用法與使用效果：化妝品/保健品說明怎麼使用、能達到什麼效果；若是食品就寫口味或食用方式，不要列出成分表(繁體中文，約50字；無法判斷就給空字串)"}。若完全無法辨識，name 回 UNKNOWN。不要多餘文字、不要 markdown。' },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } },
+        ], 380);
+        if (oa) {
+          try {
+            const m = oa.match(/\{[\s\S]*\}/);
+            const obj = m ? JSON.parse(m[0]) : {};
+            const n = (obj.name || '').trim().slice(0, 60);
+            if (n && !/UNKNOWN|無法|抱歉|sorry|cannot|can't|unable/i.test(n)) {
+              name = n;
+              info = (obj.info || '').trim().slice(0, 120);
+              usage = (obj.usage || '').trim().slice(0, 100);
+            }
+          } catch {}
+        }
+        if (!name) {
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const r = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
+            image: [...bytes],
+            prompt: 'This is a product a tourist wants to buy. Identify the product and brand. Reply with ONLY the product/brand name (read any visible text/logo on the package), no description.',
+            max_tokens: 40,
+          });
+          name = (r.description || r.response || '').trim().split('\n')[0].slice(0, 60);
+        }
+        return json({ ok: true, name, info, usage });
       } catch (e) { return json({ ok: false, error: String(e.message || e) }, 502); }
     }
     if (url.pathname !== '/price') return json({ ok: false, error: 'use /price?item=..&country=jp|kr' }, 404);
