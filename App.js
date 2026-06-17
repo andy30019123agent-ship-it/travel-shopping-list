@@ -368,7 +368,7 @@ export default function App() {
       const d = await r.json();
       setScanning(false);
       // AI 辨識→跳「識物卡」：顯示商品名(可改)＋產品簡介，再決定加入比價
-      if (d.ok && d.name) setScanResult({ uri: a.uri, name: d.name, info: d.info || '', usage: d.usage || '' });
+      if (d.ok && d.name) setScanResult({ uri: a.uri, name: d.name, info: d.info || '', usage: d.usage || '', claim: d.claim || '' });
       else alert('認不出商品，可改用文字輸入或換個角度再拍一次');
     } catch (e) { setScanning(false); }
   }
@@ -679,14 +679,29 @@ export default function App() {
         <View style={styles.centerBackdrop}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setScanResult(null)} />
           <View style={styles.storeModal}>
-            <Text style={styles.sheetKicker}>📷 AI 辨識結果</Text>
-            {scanResult?.uri ? <Image source={{ uri: scanResult.uri }} style={styles.scanPreview} resizeMode="contain" /> : null}
-            <Text style={styles.scanLabel}>商品名稱（可修改）</Text>
-            <TextInput style={styles.storeInput} value={scanResult?.name} placeholder="商品名稱" placeholderTextColor="#cdbdb0" onChangeText={t => setScanResult(s => ({ ...s, name: t }))} />
-            {scanResult?.info ? <View style={styles.scanInfoBox}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.scanInfo}>{scanResult.info}</Text></View> : null}
-            {scanResult?.usage ? <View style={styles.scanInfoBox}><Ionicons name="sparkles-outline" size={15} color={C.gold} /><Text style={styles.scanInfo}>{scanResult.usage}</Text></View> : null}
-            <TouchableOpacity style={[styles.storeSave, { marginTop: 16 }]} onPress={addFromScan} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>加入清單並比價</Text></TouchableOpacity>
-            <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setScanResult(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: 560 }}>
+              <Text style={styles.sheetKicker}>📷 AI 辨識結果</Text>
+              {scanResult?.uri ? <Image source={{ uri: scanResult.uri }} style={styles.scanPreview} resizeMode="contain" /> : null}
+              <Text style={styles.scanLabel}>商品名稱（可修改）</Text>
+              <TextInput style={styles.storeInput} value={scanResult?.name} placeholder="商品名稱" placeholderTextColor="#cdbdb0" onChangeText={t => setScanResult(s => ({ ...s, name: t }))} />
+              {scanResult?.info ? <View style={styles.scanInfoBox}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.scanInfo}>{scanResult.info}</Text></View> : null}
+              {scanResult?.usage ? <View style={styles.scanInfoBox}><Ionicons name="color-wand-outline" size={15} color={C.gold} /><Text style={styles.scanInfo}>{scanResult.usage}</Text></View> : null}
+              {scanResult?.claim ? (
+                <View style={styles.claimBox}>
+                  <Text style={styles.claimLabel}>✨ 主打效果（廠商宣稱）</Text>
+                  <Text style={styles.claimTxt}>{scanResult.claim}</Text>
+                  <Text style={styles.claimNote}>以上為產品宣傳說法，效果因人而異</Text>
+                </View>
+              ) : null}
+              {scanResult?.name ? (
+                <TouchableOpacity style={styles.scanReviewBtn} onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent((scanResult.name || '') + ' 推薦 評價 心得')}`)} activeOpacity={0.85}>
+                  <Ionicons name="search-outline" size={14} color={C.inkSoft} />
+                  <Text style={styles.scanReviewTxt}>看網友推薦・評價（部落格／社群）›</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={[styles.storeSave, { marginTop: 16 }]} onPress={addFromScan} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>加入清單並比價</Text></TouchableOpacity>
+              <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setScanResult(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1040,6 +1055,12 @@ const styles = StyleSheet.create({
   scanLabel: { color: C.muted, fontSize: 12, fontWeight: '700', marginTop: 12 },
   scanInfoBox: { flexDirection: 'row', gap: 6, backgroundColor: '#FBF3E4', borderRadius: 11, padding: 11, marginTop: 10, alignItems: 'flex-start' },
   scanInfo: { flex: 1, color: C.inkSoft, fontSize: 13, lineHeight: 19 },
+  claimBox: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: C.line },
+  claimLabel: { color: C.rose, fontSize: 12.5, fontWeight: '800', marginBottom: 5 },
+  claimTxt: { color: C.inkSoft, fontSize: 13, lineHeight: 19 },
+  claimNote: { color: C.muted, fontSize: 11, marginTop: 6, fontStyle: 'italic' },
+  scanReviewBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 10, borderRadius: 11, backgroundColor: C.bg },
+  scanReviewTxt: { color: C.inkSoft, fontWeight: '700', fontSize: 13 },
 
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(46,36,32,0.55)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: C.surface, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 20, paddingBottom: 30 },
