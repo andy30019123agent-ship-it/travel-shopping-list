@@ -258,17 +258,20 @@ export default function App() {
   const toastTimer = useRef(null);
   const showToast = (msg, undo) => { setToast({ msg, undo }); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), undo ? 4500 : 2500); };
   const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState(null); // 拍照識物卡 {uri, name, info}
+  const [scanResult, setScanResult] = useState(null); // 拍照識物卡 {uri, name, info, usage, claim}
+  const [scanAsk, setScanAsk] = useState(null); // 低信心確認 {uri, name}
+  const [aiTip, setAiTip] = useState(false); // 首次拍照提示彈窗
+  const [aiTipSeen, setAiTipSeen] = useState(false); // 是否看過首次提示(存 settings)
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
   useFonts(Ionicons.font);
 
   useEffect(() => {
     AsyncStorage.getItem(STORE_KEY).then(r => { if (r) setItems(JSON.parse(r)); setLoaded(true); });
-    AsyncStorage.getItem(SETTINGS_KEY).then(r => { const s = r ? JSON.parse(r) : {}; if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.stores) setStores(s.stores); if (s.budget) setBudget(s.budget); if (!s.onboardSeen) setOnboard(true); setSettingsLoaded(true); });
+    AsyncStorage.getItem(SETTINGS_KEY).then(r => { const s = r ? JSON.parse(r) : {}; if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.stores) setStores(s.stores); if (s.budget) setBudget(s.budget); if (s.aiTipSeen) setAiTipSeen(true); if (!s.onboardSeen) setOnboard(true); setSettingsLoaded(true); });
     fetch(`${WORKER_URL}/rate`).then(r => r.json()).then(d => { if (d.ok) setRates({ jpy: d.jpy, krw: d.krw }); }).catch(() => {});
   }, []);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
-  useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, budget, onboardSeen: !onboard })); }, [country, sort, stores, budget, onboard, settingsLoaded]);
+  useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, budget, onboardSeen: !onboard, aiTipSeen })); }, [country, sort, stores, budget, onboard, aiTipSeen, settingsLoaded]);
 
   const rateOf = c => (c === 'kr' ? rates.krw : rates.jpy);
   const update = (id, patch) => setItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
@@ -367,14 +370,24 @@ export default function App() {
       const r = await fetch(`${WORKER_URL}/vision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: b64, country }) });
       const d = await r.json();
       setScanning(false);
-      // AI 辨識→跳「識物卡」：顯示商品名(可改)＋產品簡介，再決定加入比價
-      if (d.ok && d.name) setScanResult({ uri: a.uri, name: d.name, info: d.info || '', usage: d.usage || '', claim: d.claim || '' });
-      else alert('這張不太確定是什麼 🤔\n建議正面對準包裝上的商品名稱、拍清楚一點再試，或直接用文字輸入商品名。');
+      // 三層：認不出→提示；沒十足把握(uncertain)→跳「是不是 XXX」確認；有把握→正常識物卡
+      if (d.ok && d.name) {
+        if (d.uncertain) setScanAsk({ uri: a.uri, name: d.name });
+        else setScanResult({ uri: a.uri, name: d.name, info: d.info || '', usage: d.usage || '', claim: d.claim || '' });
+      } else alert('這張不太確定是什麼 🤔\n建議正面對準包裝上的商品名稱、拍清楚一點再試，或直接用文字輸入商品名。');
     } catch (e) { setScanning(false); }
   }
   // 識物卡→加入清單並查價比價（查完跳圖片牆挑）
   function addFromScan() {
     const r = scanResult; setScanResult(null);
+    const name = (r.name || '').trim();
+    if (!name) return;
+    const it = addItem(name);
+    if (it) { update(it.id, { image: r.uri, imageManual: true }); queryOne({ ...it, name }, { pick: true }); }
+  }
+  // 低信心確認框→確認後才加入清單查價
+  function addFromAsk() {
+    const r = scanAsk; setScanAsk(null);
     const name = (r.name || '').trim();
     if (!name) return;
     const it = addItem(name);
@@ -557,7 +570,7 @@ export default function App() {
         <View style={styles.heroTop}>
           <Text style={styles.heroBrand}>免稅不是免費</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TouchableOpacity style={styles.scanBtn} onPress={() => scanImage(true)} activeOpacity={0.85} accessibilityLabel="AI 產品辨識"><Ionicons name="camera" size={18} color={C.roseDeep} /><Text style={styles.scanBtnTxt}>AI 產品辨識</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.scanBtn} onPress={() => aiTipSeen ? scanImage(true) : setAiTip(true)} activeOpacity={0.85} accessibilityLabel="AI 產品辨識"><Ionicons name="camera" size={18} color={C.roseDeep} /><Text style={styles.scanBtnTxt}>AI 產品辨識</Text></TouchableOpacity>
             <TouchableOpacity style={styles.calcBtn} onPress={() => setCalc({ cur: country, dir: 'toTWD', amt: '' })} activeOpacity={0.8} accessibilityLabel="匯率計算機"><Ionicons name="calculator-outline" size={20} color="#fff" /></TouchableOpacity>
           </View>
         </View>
@@ -688,7 +701,7 @@ export default function App() {
               {scanResult?.usage ? <View style={styles.scanInfoBox}><Ionicons name="color-wand-outline" size={15} color={C.gold} /><Text style={styles.scanInfo}>{scanResult.usage}</Text></View> : null}
               {scanResult?.claim ? (
                 <View style={styles.claimBox}>
-                  <Text style={styles.claimLabel}>✨ 主打效果（廠商宣稱）</Text>
+                  <Text style={styles.claimLabel}>✨ 主打效果（廠商宣稱／社群分享）</Text>
                   <Text style={styles.claimTxt}>{scanResult.claim}</Text>
                   <Text style={styles.claimNote}>以上為產品宣傳說法，效果因人而異</Text>
                 </View>
@@ -701,7 +714,38 @@ export default function App() {
               ) : null}
               <TouchableOpacity style={[styles.storeSave, { marginTop: 16 }]} onPress={addFromScan} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>加入清單並比價</Text></TouchableOpacity>
               <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setScanResult(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
+              <Text style={styles.scanDisclaim}>僅提供產品資訊參考，不作為購物建議</Text>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 首次使用 AI 辨識提示 */}
+      <Modal visible={aiTip} transparent animationType="fade" onRequestClose={() => setAiTip(false)}>
+        <View style={styles.centerBackdrop}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setAiTip(false)} />
+          <View style={styles.storeModal}>
+            <Text style={styles.aiTipEmoji}>📸</Text>
+            <Text style={styles.aiTipTitle}>拍照小撇步</Text>
+            <Text style={styles.aiTipBody}>盡量拍到<Text style={{ fontWeight: '800' }}>完整包裝與品牌 Logo</Text>，並對準商品名稱、光線充足、避免反光與模糊，辨識會更準喔！</Text>
+            <TouchableOpacity style={[styles.storeSave, { marginTop: 18 }]} onPress={() => { setAiTip(false); setAiTipSeen(true); scanImage(true); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>知道了，開始拍照</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 低信心確認：你要找的是 XXX 嗎 */}
+      <Modal visible={!!scanAsk} transparent animationType="fade" onRequestClose={() => setScanAsk(null)}>
+        <View style={styles.centerBackdrop}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setScanAsk(null)} />
+          <View style={styles.storeModal}>
+            <Text style={styles.sheetKicker}>🤔 不太確定…</Text>
+            {scanAsk?.uri ? <Image source={{ uri: scanAsk.uri }} style={styles.scanPreview} resizeMode="contain" /> : null}
+            <Text style={styles.scanLabel}>你要找的是這個嗎？（可修改）</Text>
+            <TextInput style={styles.storeInput} value={scanAsk?.name} placeholder="商品名稱" placeholderTextColor="#cdbdb0" onChangeText={t => setScanAsk(s => ({ ...s, name: t }))} />
+            <Text style={styles.scanAskHint}>AI 對這張照片把握不大，確認商品名後再查價會更準</Text>
+            <TouchableOpacity style={[styles.storeSave, { marginTop: 14 }]} onPress={addFromAsk} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>是，用這個查價</Text></TouchableOpacity>
+            <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setScanAsk(null)}><Text style={styles.endBack}>不是，關閉</Text></TouchableOpacity>
+            <Text style={styles.scanDisclaim}>僅提供產品資訊參考，不作為購物建議</Text>
           </View>
         </View>
       </Modal>
@@ -1061,6 +1105,11 @@ const styles = StyleSheet.create({
   claimNote: { color: C.muted, fontSize: 11, marginTop: 6, fontStyle: 'italic' },
   scanReviewBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 10, borderRadius: 11, backgroundColor: C.bg },
   scanReviewTxt: { color: C.inkSoft, fontWeight: '700', fontSize: 13 },
+  scanDisclaim: { color: C.muted, fontSize: 10.5, textAlign: 'center', marginTop: 6 },
+  scanAskHint: { color: C.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  aiTipEmoji: { fontSize: 36, textAlign: 'center', marginBottom: 4 },
+  aiTipTitle: { fontSize: 18, fontWeight: '900', color: C.ink, textAlign: 'center', marginBottom: 8 },
+  aiTipBody: { color: C.inkSoft, fontSize: 14, lineHeight: 21, textAlign: 'center' },
 
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(46,36,32,0.55)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: C.surface, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 20, paddingBottom: 30 },

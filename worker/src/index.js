@@ -230,11 +230,13 @@ export default {
       try {
         const body = await request.json();
         const b64 = (body.image || '').replace(/^data:image\/\w+;base64,/, '');
-        const visionModel = body.model || 'gpt-4.1-nano'; // 可由前端/測試指定模型，預設 gpt-4.1-nano（實測最準＋最便宜）
-        let name = '', info = '', usage = '', claim = '', oaAnswered = false;
+        // 限定便宜模型白名單，避免有人對公開端點指定昂貴模型消耗 OpenAI 額度
+        const ALLOWED_VISION_MODELS = ['gpt-4.1-nano', 'gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-nano'];
+        const visionModel = ALLOWED_VISION_MODELS.includes(body.model) ? body.model : 'gpt-4.1-nano';
+        let name = '', info = '', usage = '', claim = '', oaAnswered = false, uncertain = false;
         // OpenAI 視覺辨識，回 JSON {name, info, usage, claim, confidence}。寧可認不出也不亂猜
         const oa = await openaiChat(env, [
-          { type: 'text', text: '這是台灣遊客想買的商品照片。請只根據「包裝上實際看得到的文字、logo、圖案」辨識，不要憑空推測。\n辨識門檻(很重要)：只有能清楚讀出「具體商品名稱」時才辨識；以下情況一律回 name=UNKNOWN、不要猜——照片模糊或文字看不清、只看到品牌或製造商卻看不到產品名、只讀到通用類別字樣(如「第2類医薬品」「医薬品」「化粧品」這種法規分類不是商品名)。嚴禁從製造商或類別反推產品(看到「大正製薬」不可自己猜成感冒藥)。\n只回 JSON：{"name":"品牌+品名，簡潔好搜尋(例：numbuzin 無濾鏡提亮防曬精華)；規格(SPF/容量/色號)放 claim 不放 name；讀不到具體商品名就回 UNKNOWN","info":"客觀說明這是什麼類型的產品與主要用途，一句話，不要誇大效果，也不要提及品牌國籍或產地(約40字)","usage":"使用方式；食品就寫口味或食用方式(約40字；無法判斷給空字串)","claim":"主打效果與產品特色：先用「・」列出包裝主打的具體效果(例 SPF50+、保濕提亮)，再用一兩句補充產品特色(質地、適用對象、設計、情境)，約80~100字(無法判斷給空字串)","confidence":"high 或 low：你對 name 是否為正確且具體商品名稱的把握度，只要有任何不確定就回 low"}。格式：各欄位只填內容本身，不要把欄位名稱或冒號寫進值裡。鐵則：產地、國籍、價格、療效、症狀、適應症、成分含量等「包裝上看不到或無法確認」的資訊一律不要編造，看不到就留空字串。繁體中文。不要多餘文字、不要 markdown。' },
+          { type: 'text', text: '這是台灣遊客想買的商品照片。請只根據「包裝上實際看得到的文字、logo、圖案」辨識，不要憑空推測。\n辨識門檻(很重要)：只有能清楚讀出「具體商品名稱」時才辨識；以下情況一律回 name=UNKNOWN、不要猜——照片模糊或文字看不清、只看到品牌或製造商卻看不到產品名、只讀到通用類別字樣(如「第2類医薬品」「医薬品」「化粧品」這種法規分類不是商品名)。嚴禁從製造商或類別反推產品(看到「大正製薬」不可自己猜成感冒藥)。\n只回 JSON：{"name":"品牌+品名，簡潔好搜尋(例：numbuzin 無濾鏡提亮防曬精華)；規格(SPF/容量/色號)放 claim 不放 name；讀不到具體商品名就回 UNKNOWN","info":"客觀說明這是什麼類型的產品與主要用途，一句話，不要誇大效果，也不要提及品牌國籍或產地(約40字)","usage":"使用方式；食品就寫口味或食用方式(約40字；無法判斷給空字串)","claim":"主打效果與產品特色：先用「・」列出包裝主打的具體效果(例 SPF50+、保濕提亮)，再用一兩句補充產品特色(質地、適用對象、設計、情境)，約80~100字。用詞中性正面，避免爭議性、誇大療效或負面字眼(無法判斷給空字串)","confidence":"high 或 low：你對 name 是否為正確且具體商品名稱的把握度，只要有任何不確定就回 low"}。格式：各欄位只填內容本身，不要把欄位名稱或冒號寫進值裡。鐵則：產地、國籍、價格、療效、症狀、適應症、成分含量等「包裝上看不到或無法確認」的資訊一律不要編造，看不到就留空字串。繁體中文。不要多餘文字、不要 markdown。' },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } },
         ], 550, visionModel);
         if (oa) {
@@ -247,13 +249,17 @@ export default {
             const unreadable = /UNKNOWN|無法|抱歉|sorry|cannot|can't|unable/i.test(n);
             // name 仍夾帶「第X類/医薬品/化粧品」這種法規類別 = 沒讀到真正品名 → 視為認不出
             const categoryLeak = /医薬品|醫藥品|医薬部外品|医療機器|第[0-9０-９]+\s*類|化粧品(?!水)/.test(n) || n.replace(/\s/g, '').length <= 2;
-            if (n && !unreadable && !categoryLeak && conf !== 'low') {
+            if (n && !unreadable && !categoryLeak) {
               name = n;
-              info = (obj.info || '').trim().slice(0, 100);
-              usage = (obj.usage || '').trim().slice(0, 100);
-              claim = (obj.claim || '').trim().slice(0, 200);
+              if (conf === 'low') {
+                uncertain = true; // 有猜測但沒十足把握 → 前端跳「你要找的是 XXX 嗎」，不附介紹/效果(避免把沒把握的當真)
+              } else {
+                info = (obj.info || '').trim().slice(0, 100);
+                usage = (obj.usage || '').trim().slice(0, 100);
+                claim = (obj.claim || '').trim().slice(0, 200);
+              }
             }
-            // 否則 name 留空白 = 認不出，前端會請使用者重拍或改文字輸入
+            // 完全看不清/只讀到品牌或法規類別 → name 留空白 = 認不出，前端請使用者重拍或改文字輸入
           } catch {}
         }
         if (!name && !oaAnswered) {
@@ -267,7 +273,7 @@ export default {
           });
           name = (r.description || r.response || '').trim().split('\n')[0].slice(0, 60);
         }
-        return json({ ok: true, name, info, usage, claim });
+        return json({ ok: true, name, info, usage, claim, uncertain });
       } catch (e) { return json({ ok: false, error: String(e.message || e) }, 502); }
     }
     if (url.pathname !== '/price') return json({ ok: false, error: 'use /price?item=..&country=jp|kr' }, 404);
