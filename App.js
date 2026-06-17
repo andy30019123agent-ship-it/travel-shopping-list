@@ -95,17 +95,19 @@ export default function App() {
   const [tab, setTab] = useState('list');
   const [stores, setStores] = useState([]); // 記住的常用店家
   const [storeEdit, setStoreEdit] = useState(null); // 正在編輯店家的 item id
+  const [budget, setBudget] = useState(0); // 整趟預算(台幣)
+  const [budgetEdit, setBudgetEdit] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
   useFonts(Ionicons.font);
 
   useEffect(() => {
     AsyncStorage.getItem(STORE_KEY).then(r => { if (r) setItems(JSON.parse(r)); setLoaded(true); });
-    AsyncStorage.getItem(SETTINGS_KEY).then(r => { if (r) { const s = JSON.parse(r); if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.stores) setStores(s.stores); } });
+    AsyncStorage.getItem(SETTINGS_KEY).then(r => { if (r) { const s = JSON.parse(r); if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.stores) setStores(s.stores); if (s.budget) setBudget(s.budget); } });
     fetch(`${WORKER_URL}/rate`).then(r => r.json()).then(d => { if (d.ok) setRates({ jpy: d.jpy, krw: d.krw }); }).catch(() => {});
   }, []);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
-  useEffect(() => { AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores })); }, [country, sort, stores]);
+  useEffect(() => { AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, budget })); }, [country, sort, stores, budget]);
 
   const rateOf = c => (c === 'kr' ? rates.krw : rates.jpy);
   const update = (id, patch) => setItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
@@ -309,11 +311,10 @@ export default function App() {
           {['jp', 'kr'].map(c => (
             <TouchableOpacity key={c} style={[styles.heroSegBtn, country === c && styles.heroSegOn]} onPress={() => switchCountry(c)} activeOpacity={0.85}><Text style={[styles.heroSegTxt, country === c && styles.heroSegTxtOn]}>{CO[c].flag} {CO[c].label}</Text></TouchableOpacity>
           ))}
-          <Text style={styles.heroRate}>1{CO[country].curLabel}≈NT${rateOf(country).toFixed(country === 'kr' ? 3 : 2)}</Text>
         </View>
         <Text style={styles.heroLabel}>{tab === 'list' ? '待買預估' : '已花費'}</Text>
         <Text style={styles.heroTotal}>NT${fmt(tab === 'list' ? todoTotal : spentTotal)}</Text>
-        <Text style={styles.heroSub}>{tab === 'list' ? `待買 ${todoItems.length} 件` : `已買 ${boughtItems.length} 件 ・ ${ledger.length} 個店家`}</Text>
+        <Text style={styles.heroSub}>{tab === 'list' ? `待買 ${todoItems.length} 件` : `已買 ${boughtItems.length} 件 ・ ${ledger.length} 店`}　·　1 {CO[country].curLabel} ≈ NT${rateOf(country).toFixed(country === 'kr' ? 3 : 2)}</Text>
       </View>
 
       {/* 分頁 */}
@@ -353,6 +354,24 @@ export default function App() {
         </>
       ) : (
         <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
+          {(() => {
+            if (!budget) return (
+              <TouchableOpacity style={styles.budgetSet} onPress={() => setBudgetEdit({ val: '' })} activeOpacity={0.85}><Ionicons name="add-circle-outline" size={18} color={C.rose} /><Text style={styles.budgetSetTxt}>設定本趟預算</Text></TouchableOpacity>
+            );
+            const ratio = spentTotal / budget;
+            const col = ratio >= 0.75 ? '#E04848' : ratio >= 2 / 3 ? '#E8912E' : C.green;
+            const left = budget - spentTotal;
+            return (
+              <TouchableOpacity style={styles.budgetCard} onPress={() => setBudgetEdit({ val: String(budget) })} activeOpacity={0.9}>
+                <View style={styles.budgetTop}>
+                  <Text style={styles.budgetLabel}>預算 NT${fmt(budget)}　<Ionicons name="create-outline" size={12} color={C.muted} /></Text>
+                  <Text style={[styles.budgetLeft, { color: left < 0 ? '#E04848' : C.inkSoft }]}>{left < 0 ? `超支 NT$${fmt(-left)}` : `剩 NT$${fmt(left)}`}</Text>
+                </View>
+                <View style={styles.budgetTrack}><View style={[styles.budgetFill, { width: `${Math.min(100, ratio * 100)}%`, backgroundColor: col }]} /></View>
+                <Text style={styles.budgetSpent}>已花 <Text style={{ color: col, fontWeight: '900' }}>NT${fmt(spentTotal)}</Text>　·　{Math.round(ratio * 100)}%</Text>
+              </TouchableOpacity>
+            );
+          })()}
           {boughtItems.length === 0 && (
             <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="receipt-outline" size={38} color={C.rose} /></View><Text style={styles.emptyBig}>還沒有花費</Text><Text style={styles.empty}>在「待買清單」把買到的打「已買」{'\n'}就會移到這裡記帳、依店家算免稅門檻</Text></View>
           )}
@@ -422,6 +441,20 @@ export default function App() {
               <View style={styles.storeChips}>{stores.map(s => <TouchableOpacity key={s} style={styles.storeChip} onPress={() => setStoreEdit(e => ({ ...e, val: s }))}><Text style={styles.storeChipTxt}>{s}</Text></TouchableOpacity>)}</View>
             )}
             <TouchableOpacity style={styles.storeSave} onPress={() => { const v = (storeEdit.val || '').trim(); setItems(prev => prev.map(it => storeEdit.ids.includes(it.id) ? { ...it, store: v } : it)); rememberStore(v); setStoreEdit(null); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 預算設定 */}
+      <Modal visible={!!budgetEdit} transparent animationType="fade" onRequestClose={() => setBudgetEdit(null)}>
+        <TouchableOpacity style={styles.centerBackdrop} activeOpacity={1} onPress={() => setBudgetEdit(null)}>
+          <View style={styles.storeModal} onStartShouldSetResponder={() => true}>
+            <Text style={styles.sheetTitle}>本趟預算（台幣）</Text>
+            <TextInput style={styles.storeInput} keyboardType="numeric" value={budgetEdit?.val} placeholder="例如 20000" placeholderTextColor="#cdbdb0" autoFocus onChangeText={t => setBudgetEdit(s => ({ ...s, val: t.replace(/[^0-9]/g, '') }))} />
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+              {budget > 0 && <TouchableOpacity style={[styles.storeSave, { flex: 0, paddingHorizontal: 16, backgroundColor: C.bg }]} onPress={() => { setBudget(0); setBudgetEdit(null); }}><Text style={[styles.storeSaveTxt, { color: C.inkSoft }]}>清除</Text></TouchableOpacity>}
+              <TouchableOpacity style={[styles.storeSave, { flex: 1 }]} onPress={() => { setBudget(parseInt(budgetEdit.val) || 0); setBudgetEdit(null); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -540,6 +573,17 @@ const styles = StyleSheet.create({
   queryBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 1 },
   doneBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 11 },
   doneBtnTxt: { color: C.green, fontWeight: '800', fontSize: 13.5 },
+
+  // 預算
+  budgetSet: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.line, borderStyle: 'dashed', borderRadius: 16, paddingVertical: 14, marginBottom: 13 },
+  budgetSetTxt: { color: C.rose, fontWeight: '800', fontSize: 14 },
+  budgetCard: { backgroundColor: C.surface, borderRadius: 18, padding: 15, marginBottom: 13, borderWidth: 1, borderColor: C.line },
+  budgetTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  budgetLabel: { color: C.ink, fontSize: 14, fontWeight: '800' },
+  budgetLeft: { fontSize: 13, fontWeight: '800', fontFamily: MONO },
+  budgetTrack: { height: 12, borderRadius: 999, backgroundColor: C.bg, marginTop: 10, overflow: 'hidden' },
+  budgetFill: { height: 12, borderRadius: 999 },
+  budgetSpent: { color: C.inkSoft, fontSize: 12.5, marginTop: 8, fontWeight: '600' },
 
   // 記帳
   storeGroup: { backgroundColor: C.surface, borderRadius: 18, padding: 14, marginBottom: 13, borderWidth: 1, borderColor: C.line },

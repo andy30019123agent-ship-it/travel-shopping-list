@@ -41,9 +41,16 @@ const KR_DICT = {
   '蘭芝': '라네즈', '蜂蜜唇膜': '라네즈 립 슬리핑 마스크', '悅詩風吟': '이니스프리',
   '菲詩小舖': '더페이스샵', '香蕉牛奶': '바나나맛 우유', '辛拉麵': '신라면',
   '蜂蜜奶油杏仁': '허니버터아몬드', '紅蔘': '홍삼',
+  // 當紅 K-beauty（含中文俗稱與英文品牌）
+  '數字面膜': '넘버즈인 마스크팩', 'numbuzin': '넘버즈인', '넘버즈인': '넘버즈인',
+  'torriden': '토리든', '토리든': '토리든', 'torriden玻尿酸面膜': '토리든 다이브인 마스크팩',
+  'reju-all': '닥터리쥬올', 'rejuall': '닥터리쥬올', 'drrejuall': '닥터리쥬올', '리쥬올': '닥터리쥬올',
+  'anua': '아누아', '아누아': '아누아', 'medicube': '메디큐브', 'mediheal': '메디힐',
+  'skin1004': '스킨1004', 'beautyofjoseon': '조선미녀', '朝鮮美女': '조선미녀',
+  'roundlab': '라운드랩', 'abib': '아비브', 'tirtir': '티르티르', 'manyo': '마녀공장', '魔女工廠': '마녀공장',
 };
 
-function normalize(s) { return (s || '').replace(/\s+/g, '').trim(); }
+function normalize(s) { return (s || '').toLowerCase().replace(/[\s\-_·.・]/g, '').trim(); }
 function lev(a, b) {
   const m = a.length, n = b.length;
   const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
@@ -57,6 +64,13 @@ function dictLookup(dict, input) {
   const q = normalize(input);
   if (!q) return null;
   if (dict[q]) return dict[q];
+  // 逐詞比對：「品牌 + 中文描述」時，抓出已知品牌
+  for (const tok of (input || '').split(/[\s,/]+/)) {
+    const t = normalize(tok);
+    if (t.length >= 2 && dict[t]) return dict[t];
+  }
+  // 正規化後的鍵也建一份對照
+  for (const key of Object.keys(dict)) { if (normalize(key) === q) return dict[key]; }
   let best = null, bestScore = Infinity;
   for (const key of Object.keys(dict)) {
     const k = normalize(key);
@@ -85,10 +99,11 @@ async function guessTerms(env, item, country) {
     : 'Use the official Japanese brand/product name with correct Kanji/Katakana (NOT all-hiragana).';
   const prompt =
     `A Taiwanese tourist wants to buy "${item}" in ${country === 'kr' ? 'Korea' : 'Japan'}. ` +
-    `The input may be a formal name, a brand, a Taiwanese nickname/slang, a Taiwanese transliteration of a ` +
-    `Japanese/Korean drugstore brand, OR contain typos (e.g. "小護士"=メンソレータム, "魔法瓶"=サーモス, ` +
-    `"合利他命"=アリナミン, "表飛鳴"=新ビオフェルミン, 韓國"后"=Whoo). ` +
-    `Correct obvious typos, then figure out which actual product it refers to, then give the single best ${lang} search keyword ` +
+    `The input may be a formal name, a brand, a Taiwanese nickname/slang, a Taiwanese transliteration, ` +
+    `an English/romanized brand name, OR contain typos (e.g. "小護士"=メンソレータム, "魔法瓶"=サーモス, ` +
+    `"合利他命"=アリナミン, 韓國"后"=Whoo, "numbuzin/數字面膜"=넘버즈인, "Torriden"=토리든, "Anua"=아누아, "Rejuran"=리쥬란). ` +
+    `These are often trendy/popular cosmetics or drugstore items. Convert English/romanized brand names to the correct local script. ` +
+    `Correct obvious typos, identify the actual (popular) product, then give the single best ${lang} search keyword ` +
     `used on ${lang} shopping sites to find that product. ` +
     `${hint} Use the real local brand/product name, not a literal character-by-character translation. ` +
     `Reply with ONLY the keyword — no quotes, no romaji, no explanation.\n\nProduct: ${item}`;
