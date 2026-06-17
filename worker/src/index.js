@@ -160,6 +160,10 @@ export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
     const url = new URL(request.url);
+    if (url.pathname === '/rate') {
+      const [jpy, krw] = await Promise.all([rate('JPY'), rate('KRW')]);
+      return json({ ok: true, jpy: jpy || FALLBACK_RATE.JPY, krw: krw || FALLBACK_RATE.KRW });
+    }
     if (url.pathname !== '/price') return json({ ok: false, error: 'use /price?item=..&country=jp|kr' }, 404);
 
     let item = (url.searchParams.get('item') || '').trim();
