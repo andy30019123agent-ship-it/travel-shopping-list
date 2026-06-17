@@ -29,6 +29,7 @@ function dedupeBy(arr, keyFn) {
   return out;
 }
 
+// 樂天市場商品搜尋（單一賣場的商品列表）
 async function rakutenSearch(term) {
   const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
     `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${enc(term)}&hits=20&format=json`;
@@ -40,6 +41,22 @@ async function rakutenSearch(term) {
     const i = x.Item || x;
     if (!i.itemName || !i.itemPrice) continue;
     out.push({ title: i.itemName, price: i.itemPrice, image: i.mediumImageUrls?.[0]?.imageUrl || i.smallImageUrls?.[0]?.imageUrl || '' });
+  }
+  return out;
+}
+// 樂天商品價格導航（比價型：每個商品含多店價格區間 min/avg/max）
+async function rakutenProductSearch(term) {
+  const url = `https://openapi.rakuten.co.jp/ichibaproduct/api/Product/Search/20250801` +
+    `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${enc(term)}&hits=20&format=json`;
+  const rk = await fetch(url);
+  if (!rk.ok) throw new Error(`樂天比價失敗 (${rk.status})`);
+  const rj = await rk.json();
+  const out = [];
+  for (const x of (rj.Products || [])) {
+    const p = x.Product || x;
+    const price = p.averagePrice || p.minPrice;
+    if (!p.productName || !price) continue;
+    out.push({ title: p.productName, price: Math.round(price), priceMin: p.minPrice, priceMax: p.maxPrice, image: p.mediumImageUrl || p.smallImageUrl || '' });
   }
   return out;
 }
@@ -56,14 +73,15 @@ async function fetchCandidates(item) {
   if (item.country === 'kr') {
     cands = (data.candidates || []).map(c => ({ title: c.title, price: c.price, image: c.image }));
   } else {
-    // 先用原文查樂天，不足再用翻譯詞
+    // 日本：先用「商品價格導航」(比價型) 查，原文→翻譯詞；不足再退回市場商品搜尋
     let raw = data.raw || item.name;
-    cands = await rakutenSearch(raw).catch(() => []);
+    cands = await rakutenProductSearch(raw).catch(() => []);
     if (cands.length < 3 && term && term !== raw) {
-      const more = await rakutenSearch(term).catch(() => []);
-      cands = dedupeBy([...cands, ...more], c => c.title.slice(0, 12));
-    } else {
-      cands = dedupeBy(cands, c => c.title.slice(0, 12));
+      cands = dedupeBy([...cands, ...await rakutenProductSearch(term).catch(() => [])], c => c.title.slice(0, 12));
+    }
+    if (cands.length < 3) {
+      const items = await rakutenSearch(term || raw).catch(() => []);
+      cands = dedupeBy([...cands, ...items], c => c.title.slice(0, 12));
     }
     cands = cands.slice(0, 10);
   }
