@@ -18,7 +18,13 @@
       }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "themeColor": "#E0567C",
+      "backgroundColor": "#F6F0EA",
+      "display": "standalone",
+      "name": "免稅不是免費",
+      "shortName": "免稅不是免費",
+      "description": "出國購物清單：日韓即時比價、換算台幣、免稅門檻"
     },
     "experiments": {
       "baseUrl": "/travel-shopping-list"

@@ -7,7 +7,7 @@
 const RAKUTEN_REFERER = 'https://andy30019123agent-ship-it.github.io/';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -164,6 +164,23 @@ export default {
       const [jpy, krw] = await Promise.all([rate('JPY'), rate('KRW')]);
       return json({ ok: true, jpy: jpy || FALLBACK_RATE.JPY, krw: krw || FALLBACK_RATE.KRW });
     }
+    if (url.pathname === '/vision') {
+      if (request.method !== 'POST') return json({ ok: false, error: 'POST image' }, 405);
+      try {
+        const body = await request.json();
+        const b64 = (body.image || '').replace(/^data:image\/\w+;base64,/, '');
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const r = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
+          image: [...bytes],
+          prompt: 'This is a product a tourist wants to buy. Identify the product and brand. Reply with ONLY the product/brand name (read any visible text/logo on the package), no description.',
+          max_tokens: 40,
+        });
+        const name = (r.description || r.response || '').trim().split('\n')[0].slice(0, 60);
+        return json({ ok: true, name });
+      } catch (e) { return json({ ok: false, error: String(e.message || e) }, 502); }
+    }
     if (url.pathname !== '/price') return json({ ok: false, error: 'use /price?item=..&country=jp|kr' }, 404);
 
     let item = (url.searchParams.get('item') || '').trim();
@@ -178,16 +195,32 @@ export default {
         fromUrl = await extractFromUrl(item);
         if (fromUrl) item = fromUrl;
       }
-      const terms = givenTerm ? [givenTerm] : await guessTerms(env, item, country);
 
       if (country === 'jp') {
         const jpyRate = (await rate('JPY')) || FALLBACK_RATE.JPY;
-        return json({ ok: true, country: 'jp', terms, rate: jpyRate, currency: '¥', resolved: fromUrl });
+        // 智慧搜尋：先回原文，前端先用原文查樂天；不足再用翻譯詞。指定 term 則只回該詞。
+        const translated = givenTerm ? givenTerm : (await guessTerms(env, item, country))[0];
+        return json({ ok: true, country: 'jp', raw: item, term: translated, terms: [translated], rate: jpyRate, currency: '¥', resolved: fromUrl });
       }
 
-      const candidates = await naverCandidates(env, terms);
+      // 韓國：worker 直接查。先原文搜，不足再翻譯搜。
       const krwRate = (await rate('KRW')) || FALLBACK_RATE.KRW;
-      return json({ ok: true, country: 'kr', terms, rate: krwRate, currency: '₩', candidates, resolved: fromUrl });
+      if (givenTerm) {
+        const candidates = await naverCandidates(env, [givenTerm]);
+        return json({ ok: true, country: 'kr', raw: givenTerm, term: givenTerm, terms: [givenTerm], rate: krwRate, currency: '₩', candidates, resolved: fromUrl });
+      }
+      let usedTerm = item;
+      let candidates = await naverCandidates(env, [item]); // 原文先搜
+      if (candidates.length < 3) {
+        const translated = (await guessTerms(env, item, country))[0];
+        if (translated && normalize(translated) !== normalize(item)) {
+          const more = await naverCandidates(env, [translated]);
+          const seen = new Set(candidates.map(c => c.title.slice(0, 14)));
+          for (const m of more) { if (!seen.has(m.title.slice(0, 14))) { candidates.push(m); seen.add(m.title.slice(0, 14)); } }
+          if (candidates.length) usedTerm = translated;
+        }
+      }
+      return json({ ok: true, country: 'kr', raw: item, term: usedTerm, terms: [usedTerm], rate: krwRate, currency: '₩', candidates, resolved: fromUrl });
     } catch (e) {
       return json({ ok: false, error: String(e.message || e) }, 502);
     }

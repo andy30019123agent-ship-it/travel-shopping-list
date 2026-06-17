@@ -13,6 +13,7 @@ const SETTINGS_KEY = 'travel-shopping-settings-v1';
 const WORKER_URL = 'https://menshui-price.andy30019123agent.workers.dev';
 const RAKUTEN_APP_ID = '3ec6041d-d772-4a05-861a-9d15ec64dafa';
 const RAKUTEN_ACCESS_KEY = 'pk_SuWs3ZCwNcFZS14BLH8QbOcDkOOBMKlyDRp7L3a2ANN';
+const TAXFREE = { jp: 5000, kr: 15000 }; // 參考免稅/退稅門檻（當地幣別）
 
 const CO = {
   jp: { flag: '🇯🇵', label: '日本', cur: '¥', curLabel: '日圓' },
@@ -22,58 +23,63 @@ const fmt = n => (n == null ? '' : Math.round(n).toLocaleString('en-US'));
 const enc = encodeURIComponent;
 const MONO = Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monospace', ios: 'Menlo', android: 'monospace', default: 'monospace' });
 
+function dedupeBy(arr, keyFn) {
+  const seen = new Set(); const out = [];
+  for (const x of arr) { const k = keyFn(x); if (!seen.has(k)) { seen.add(k); out.push(x); } }
+  return out;
+}
+
+async function rakutenSearch(term) {
+  const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
+    `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${enc(term)}&hits=20&format=json`;
+  const rk = await fetch(url);
+  if (!rk.ok) throw new Error(`樂天查詢失敗 (${rk.status})`);
+  const rj = await rk.json();
+  const out = [];
+  for (const x of (rj.Items || [])) {
+    const i = x.Item || x;
+    if (!i.itemName || !i.itemPrice) continue;
+    out.push({ title: i.itemName, price: i.itemPrice, image: i.mediumImageUrls?.[0]?.imageUrl || i.smallImageUrls?.[0]?.imageUrl || '' });
+  }
+  return out;
+}
+
 async function fetchCandidates(item) {
   const q = item.term ? `term=${enc(item.term)}` : `item=${enc(item.name)}`;
   const res = await fetch(`${WORKER_URL}/price?country=${item.country}&${q}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || '查詢失敗');
-  const term = (data.terms && data.terms[0]) || item.term || '';
+  const term = data.term || (data.terms && data.terms[0]) || item.term || '';
   const currency = data.currency || CO[item.country].cur;
   const rate = data.rate || (item.country === 'kr' ? 0.021 : 0.197);
-  let cands = [];
+  let cands;
   if (item.country === 'kr') {
-    cands = (data.candidates || []).map(c => ({ title: c.title, price: c.price, image: c.image, twd: Math.round(c.price * rate) }));
+    cands = (data.candidates || []).map(c => ({ title: c.title, price: c.price, image: c.image }));
   } else {
-    const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
-      `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${enc(term)}&hits=20&format=json`;
-    const rk = await fetch(url);
-    if (!rk.ok) throw new Error(`樂天查詢失敗 (${rk.status})`);
-    const rj = await rk.json();
-    const seen = new Set();
-    for (const x of (rj.Items || [])) {
-      const i = x.Item || x;
-      const title = i.itemName || '';
-      const price = i.itemPrice;
-      const image = i.mediumImageUrls?.[0]?.imageUrl || i.smallImageUrls?.[0]?.imageUrl || '';
-      if (!title || !price) continue;
-      const key = title.slice(0, 12);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      cands.push({ title, price, image, twd: Math.round(price * rate) });
-      if (cands.length >= 10) break;
+    // 先用原文查樂天，不足再用翻譯詞
+    let raw = data.raw || item.name;
+    cands = await rakutenSearch(raw).catch(() => []);
+    if (cands.length < 3 && term && term !== raw) {
+      const more = await rakutenSearch(term).catch(() => []);
+      cands = dedupeBy([...cands, ...more], c => c.title.slice(0, 12));
+    } else {
+      cands = dedupeBy(cands, c => c.title.slice(0, 12));
     }
+    cands = cands.slice(0, 10);
   }
+  cands = cands.map(c => ({ ...c, twd: Math.round(c.price * rate) }));
   return { term, currency, candidates: cands, resolved: data.resolved || '' };
 }
 
 function AnimatedCard({ children, style }) {
   const a = useRef(new Animated.Value(0)).current;
-  useEffect(() => { Animated.timing(a, { toValue: 1, duration: 260, useNativeDriver: true }).start(); }, []);
-  return (
-    <Animated.View style={[style, { opacity: a, transform: [{ translateY: a.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }]}>
-      {children}
-    </Animated.View>
-  );
+  useEffect(() => { Animated.timing(a, { toValue: 1, duration: 240, useNativeDriver: true }).start(); }, []);
+  return <Animated.View style={[style, { opacity: a, transform: [{ translateY: a.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] }]}>{children}</Animated.View>;
 }
 function PriceTag({ twd }) {
   const s = useRef(new Animated.Value(0.8)).current;
   useEffect(() => { s.setValue(0.8); Animated.spring(s, { toValue: 1, friction: 5, tension: 150, useNativeDriver: true }).start(); }, [twd]);
-  return (
-    <Animated.View style={[styles.priceTag, { transform: [{ scale: s }] }]}>
-      <Text style={styles.priceTagCur}>NT$</Text>
-      <Text style={styles.priceTagNum}>{fmt(twd)}</Text>
-    </Animated.View>
-  );
+  return <Animated.View style={[styles.priceTag, { transform: [{ scale: s }] }]}><Text style={styles.priceTagCur}>NT$</Text><Text style={styles.priceTagNum}>{fmt(twd)}</Text></Animated.View>;
 }
 
 export default function App() {
@@ -83,39 +89,43 @@ export default function App() {
   const [busy, setBusy] = useState({});
   const [picker, setPicker] = useState(null);
   const [zoom, setZoom] = useState(null);
+  const [calc, setCalc] = useState(null);
   const [country, setCountry] = useState('jp');
   const [sort, setSort] = useState('added');
-  const [hideDone, setHideDone] = useState(false);
+  const [tab, setTab] = useState('list');
+  const [stores, setStores] = useState([]); // 記住的常用店家
+  const [storeEdit, setStoreEdit] = useState(null); // 正在編輯店家的 item id
+  const [scanning, setScanning] = useState(false);
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
-  const [calc, setCalc] = useState(null);
-  const [fontsLoaded] = useFonts(Ionicons.font);
+  useFonts(Ionicons.font);
 
   useEffect(() => {
     AsyncStorage.getItem(STORE_KEY).then(r => { if (r) setItems(JSON.parse(r)); setLoaded(true); });
-    AsyncStorage.getItem(SETTINGS_KEY).then(r => { if (r) { const s = JSON.parse(r); if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.hideDone != null) setHideDone(s.hideDone); } });
+    AsyncStorage.getItem(SETTINGS_KEY).then(r => { if (r) { const s = JSON.parse(r); if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.stores) setStores(s.stores); } });
     fetch(`${WORKER_URL}/rate`).then(r => r.json()).then(d => { if (d.ok) setRates({ jpy: d.jpy, krw: d.krw }); }).catch(() => {});
   }, []);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
-  useEffect(() => { AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, hideDone })); }, [country, sort, hideDone]);
+  useEffect(() => { AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores })); }, [country, sort, stores]);
 
+  const rateOf = c => (c === 'kr' ? rates.krw : rates.jpy);
   const update = (id, patch) => setItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
   const remove = id => setItems(prev => prev.filter(it => it.id !== id));
+  const rememberStore = name => { const n = name.trim(); if (n && !stores.includes(n)) setStores(prev => [n, ...prev].slice(0, 8)); };
 
-  const addItem = () => {
-    const name = input.trim();
+  const addItem = (nameArg) => {
+    const name = (nameArg ?? input).trim();
     if (!name) return;
-    const it = { id: Date.now().toString(), name, country, qty: 1, note: '', term: '', image: '', imageManual: false, purchased: false, price: null, candidates: null, currency: CO[country].cur };
+    const it = { id: Date.now().toString() + Math.random().toString(36).slice(2, 5), name, country, qty: 1, note: '', term: '', image: '', imageManual: false, status: 'todo', price: null, candidates: null, currency: CO[country].cur };
     setItems(prev => [it, ...prev]);
     setInput('');
-    queryOne(it);
+    return it;
   };
 
   async function queryOne(item) {
     setBusy(b => ({ ...b, [item.id]: true }));
     try {
-      const { term, currency, candidates, resolved } = await fetchCandidates(item);
+      const { term, currency, candidates } = await fetchCandidates(item);
       const patch = { term, currency, candidates };
-      if (resolved) patch.name = resolved;
       if (!candidates.length) { patch.noResult = true; patch.price = null; }
       else {
         patch.noResult = false;
@@ -125,91 +135,111 @@ export default function App() {
       }
       update(item.id, patch);
     } catch (e) {
-      setBusy(b => ({ ...b, [item.id]: 'err' }));
-      setTimeout(() => setBusy(b => ({ ...b, [item.id]: false })), 2500);
-      return;
+      setBusy(b => ({ ...b, [item.id]: 'err' })); setTimeout(() => setBusy(b => ({ ...b, [item.id]: false })), 2500); return;
     }
     setBusy(b => ({ ...b, [item.id]: false }));
   }
-
+  async function queryAll() {
+    const todo = items.filter(it => it.status === 'todo' && !it.price);
+    for (const it of todo) { await queryOne(it); }
+  }
   function openPicker(item) {
-    if (item.candidates && item.candidates.length) setPicker({ itemId: item.id, currency: item.currency, candidates: item.candidates, name: item.name });
+    if (item.candidates && item.candidates.length) setPicker({ itemId: item.id, currency: item.currency, candidates: item.candidates, name: item.name, term: item.term || '' });
     else queryOne(item);
   }
   function choosePick(c) {
     const { itemId, currency } = picker;
-    setItems(prev => prev.map(it => it.id === itemId
-      ? { ...it, price: { price: c.price, twd: c.twd, currency, title: c.title }, image: it.imageManual ? it.image : (c.image || it.image), noResult: false }
-      : it));
+    setItems(prev => prev.map(it => it.id === itemId ? { ...it, price: { price: c.price, twd: c.twd, currency, title: c.title }, image: it.imageManual ? it.image : (c.image || it.image), noResult: false } : it));
     setPicker(null);
+  }
+  async function repickWithTerm() {
+    const id = picker.itemId; const t = picker.term.trim();
+    setPicker(null);
+    const it = items.find(x => x.id === id); if (!it) return;
+    update(id, { term: t });
+    await queryOne({ ...it, term: t });
   }
   async function pickImage(id) {
     try { const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 }); if (!res.canceled && res.assets?.[0]) update(id, { image: res.assets[0].uri, imageManual: true }); } catch (e) {}
   }
+  // 拍照/選圖搜圖
+  async function scanImage(fromCamera) {
+    try {
+      const res = fromCamera
+        ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true })
+        : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
+      if (res.canceled || !res.assets?.[0]) return;
+      setScanning(true);
+      const a = res.assets[0];
+      let b64 = a.base64;
+      if (!b64) { setScanning(false); return; }
+      const r = await fetch(`${WORKER_URL}/vision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: b64, country }) });
+      const d = await r.json();
+      setScanning(false);
+      if (d.ok && d.name) { const it = addItem(d.name); if (it) { update(it.id, { image: a.uri, imageManual: true }); queryOne({ ...it, name: d.name }); } }
+      else alert('認不出商品，請改用文字輸入');
+    } catch (e) { setScanning(false); }
+  }
+
   function switchCountry(c) {
     if (c === country) return;
     setCountry(c);
-    const updated = items.map(it => ({ ...it, country: c, term: '', price: null, candidates: null, noResult: false, image: it.imageManual ? it.image : '' }));
+    const updated = items.map(it => it.status === 'todo' ? { ...it, country: c, term: '', price: null, candidates: null, noResult: false, image: it.imageManual ? it.image : '' } : it);
     setItems(updated);
-    updated.forEach(it => queryOne(it));
   }
-  function switchItemCountry(item, c) {
-    if (item.country === c) return;
-    const u = { ...item, country: c, term: '', price: null, candidates: null, noResult: false, image: item.imageManual ? item.image : '' };
-    update(item.id, u); queryOne(u);
-  }
+  function completeItem(item) { update(item.id, { status: 'bought', store: item.store || '', boughtLocal: item.price ? item.price.price : 0 }); }
+  function unbuy(item) { update(item.id, { status: 'todo' }); }
 
-  const totals = useMemo(() => {
-    let todo = 0, done = 0, todoN = 0;
-    for (const it of items) { if (!it.price) { if (!it.purchased) todoN++; continue; } const t = it.price.twd * it.qty; if (it.purchased) done += t; else { todo += t; todoN++; } }
-    return { todo, done, todoN };
-  }, [items]);
-
-  const { todoItems, doneItems } = useMemo(() => {
-    const sorter = {
-      added: (a, b) => Number(b.id) - Number(a.id),
-      priceHigh: (a, b) => (b.price?.twd || 0) * b.qty - (a.price?.twd || 0) * a.qty,
-      priceLow: (a, b) => ((a.price?.twd || 1e12) * a.qty) - ((b.price?.twd || 1e12) * b.qty),
-    }[sort];
-    return { todoItems: items.filter(i => !i.purchased).sort(sorter), doneItems: items.filter(i => i.purchased).sort(sorter) };
+  const todoItems = useMemo(() => {
+    const sorter = { added: (a, b) => (a.id < b.id ? 1 : -1), priceHigh: (a, b) => (b.price?.twd || 0) * b.qty - (a.price?.twd || 0) * a.qty, priceLow: (a, b) => ((a.price?.twd || 1e12) * a.qty) - ((b.price?.twd || 1e12) * b.qty) }[sort];
+    return items.filter(i => i.status === 'todo').sort(sorter);
   }, [items, sort]);
+  const boughtItems = useMemo(() => items.filter(i => i.status === 'bought'), [items]);
+
+  const todoTotal = useMemo(() => todoItems.reduce((s, it) => s + (it.price ? it.price.twd * it.qty : 0), 0), [todoItems]);
+  // 記帳：依店家分組
+  const ledger = useMemo(() => {
+    const groups = {};
+    for (const it of boughtItems) {
+      const key = (it.store || '').trim() || '__none__';
+      if (!groups[key]) groups[key] = { store: key === '__none__' ? '' : key, items: [], local: 0, twd: 0, country: it.country };
+      const localUnit = it.boughtLocal != null ? it.boughtLocal : (it.price ? it.price.price : 0);
+      groups[key].items.push(it);
+      groups[key].local += localUnit * it.qty;
+      groups[key].twd += Math.round(localUnit * rateOf(it.country)) * it.qty;
+    }
+    return Object.values(groups);
+  }, [boughtItems, rates]);
+  const spentTotal = useMemo(() => ledger.reduce((s, g) => s + g.twd, 0), [ledger]);
 
   const SORT_LABEL = { added: '加入順序', priceHigh: '價格高→低', priceLow: '價格低→高' };
   const cycleSort = () => setSort(s => (s === 'added' ? 'priceHigh' : s === 'priceHigh' ? 'priceLow' : 'added'));
-  const rateOf = c => (c === 'kr' ? rates.krw : rates.jpy);
 
-  const renderCard = it => {
+  // ---- 待買卡片 ----
+  const renderTodo = it => {
     const state = busy[it.id];
     return (
-      <AnimatedCard key={it.id} style={[styles.card, it.purchased && styles.cardDone]}>
+      <AnimatedCard key={it.id} style={styles.card}>
         <View style={styles.rowTop}>
-          <TouchableOpacity style={[styles.check, it.purchased && styles.checkOn]} accessibilityLabel={`購買勾選-${it.name}`} onPress={() => update(it.id, { purchased: !it.purchased })} activeOpacity={0.7}>
-            {it.purchased ? <Ionicons name="checkmark" size={17} color="#fff" /> : null}
-          </TouchableOpacity>
-          <Text style={[styles.name, it.purchased && styles.nameDone]} numberOfLines={2}>{it.name}</Text>
+          <Text style={styles.name} numberOfLines={2}>{it.name}</Text>
           <TouchableOpacity onPress={() => remove(it.id)} hitSlop={10} accessibilityLabel="刪除"><Ionicons name="close" size={20} color="#cbbdb2" /></TouchableOpacity>
         </View>
-
         <View style={styles.body}>
-          <TouchableOpacity style={styles.imgWrap} onPress={() => it.image ? setZoom({ url: it.image, itemId: it.id }) : pickImage(it.id)} activeOpacity={0.85}>
-            {it.image ? <Image source={{ uri: it.image }} style={styles.img} /> : (
-              <View style={styles.imgEmpty}><Ionicons name="camera-outline" size={22} color={C.muted} /><Text style={styles.imgEmptyTxt}>加圖</Text></View>
-            )}
+          <TouchableOpacity style={styles.imgWrap} onPress={() => it.image ? setZoom({ url: it.image, itemId: it.id }) : pickImage(it.id)} activeOpacity={0.85} accessibilityLabel="商品圖片">
+            {it.image ? <Image source={{ uri: it.image }} style={styles.img} /> : <View style={styles.imgEmpty}><Ionicons name="camera-outline" size={22} color={C.muted} /><Text style={styles.imgEmptyTxt}>加圖</Text></View>}
           </TouchableOpacity>
           <View style={styles.bodyRight}>
             <TextInput style={styles.note} placeholder="備註：給媽媽 / 無香料…" placeholderTextColor="#c3b6ab" value={it.note} onChangeText={t => update(it.id, { note: t })} />
             <View style={styles.bodyRow}>
               <View style={styles.miniSeg}>
                 {['jp', 'kr'].map(c => (
-                  <TouchableOpacity key={c} style={[styles.miniSegBtn, it.country === c && styles.miniSegOn]} onPress={() => switchItemCountry(it, c)} activeOpacity={0.8}>
-                    <Text style={[styles.miniSegTxt, it.country === c && styles.miniSegTxtOn]}>{CO[c].flag}</Text>
-                  </TouchableOpacity>
+                  <TouchableOpacity key={c} style={[styles.miniSegBtn, it.country === c && styles.miniSegOn]} onPress={() => { if (it.country !== c) { update(it.id, { country: c, term: '', price: null, candidates: null, noResult: false, image: it.imageManual ? it.image : '' }); } }} accessibilityLabel={CO[c].label}><Text style={[styles.miniSegTxt, it.country === c && styles.miniSegTxtOn]}>{CO[c].flag}</Text></TouchableOpacity>
                 ))}
               </View>
               <View style={styles.qty}>
-                <TouchableOpacity style={styles.qtyBtn} onPress={() => update(it.id, { qty: Math.max(1, it.qty - 1) })} activeOpacity={0.7}><Ionicons name="remove" size={17} color={C.ink} /></TouchableOpacity>
+                <TouchableOpacity style={styles.qtyBtn} onPress={() => update(it.id, { qty: Math.max(1, it.qty - 1) })} accessibilityLabel="減少"><Ionicons name="remove" size={17} color={C.ink} /></TouchableOpacity>
                 <Text style={styles.qtyNum}>{it.qty}</Text>
-                <TouchableOpacity style={styles.qtyBtn} onPress={() => update(it.id, { qty: it.qty + 1 })} activeOpacity={0.7}><Ionicons name="add" size={17} color={C.ink} /></TouchableOpacity>
+                <TouchableOpacity style={styles.qtyBtn} onPress={() => update(it.id, { qty: it.qty + 1 })} accessibilityLabel="增加"><Ionicons name="add" size={17} color={C.ink} /></TouchableOpacity>
               </View>
             </View>
           </View>
@@ -220,32 +250,48 @@ export default function App() {
         ) : it.price ? (
           <View style={styles.priceRow}>
             <PriceTag twd={it.price.twd * it.qty} />
-            <TouchableOpacity style={styles.priceMid} onPress={() => openPicker(it)} activeOpacity={0.7}>
+            <View style={styles.priceMid}>
               <Text style={styles.localPrice}>{it.price.currency}{fmt(it.price.price)}{it.qty > 1 ? ` ×${it.qty}` : ''}</Text>
-              <View style={styles.changeRow}><Text style={styles.pickedTitle} numberOfLines={1}>{it.price.title}</Text><Ionicons name="chevron-down" size={13} color={C.rose} /></View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.reBtn} onPress={() => queryOne(it)} activeOpacity={0.7} accessibilityLabel="重新查價"><Ionicons name="refresh" size={17} color={C.inkSoft} /></TouchableOpacity>
+              <Text style={styles.pickedTitle} numberOfLines={1}>{it.price.title}</Text>
+            </View>
+            <TouchableOpacity style={styles.changeBtn} onPress={() => openPicker(it)} activeOpacity={0.8}><Ionicons name="swap-horizontal" size={14} color={C.roseDeep} /><Text style={styles.changeBtnTxt}>換</Text></TouchableOpacity>
           </View>
         ) : (
           <View style={styles.priceRow}>
-            <Text style={[styles.flex1, state === 'err' || it.noResult ? styles.errTxt : styles.noPrice]}>{state === 'err' ? '連線出錯，再試一次' : it.noResult ? '查無結果，改搜尋字再查' : '還沒查價'}</Text>
+            <Text style={[styles.flex1, state === 'err' || it.noResult ? styles.errTxt : styles.noPrice]}>{state === 'err' ? '連線出錯，再試一次' : it.noResult ? '查無結果，點換一個改關鍵字' : '尚未查價'}</Text>
             <TouchableOpacity style={styles.queryBtn} onPress={() => queryOne(it)} activeOpacity={0.85}><Ionicons name="search" size={15} color="#fff" /><Text style={styles.queryBtnTxt}>查價</Text></TouchableOpacity>
           </View>
         )}
 
-        {(it.term || it.price) ? (
-          <View style={styles.termRow}>
-            <Ionicons name="search-outline" size={13} color={C.gold} />
-            <TextInput style={styles.termInput} value={it.term} placeholder="翻譯後可改再查" placeholderTextColor="#d3b3bf" onChangeText={t => update(it.id, { term: t })} />
-          </View>
-        ) : null}
+        <TouchableOpacity style={styles.doneBtn} onPress={() => completeItem(it)} activeOpacity={0.85} accessibilityLabel="標記已買，移到記帳">
+          <Ionicons name="checkmark-circle-outline" size={18} color={C.green} /><Text style={styles.doneBtnTxt}>已買，移到記帳</Text>
+        </TouchableOpacity>
       </AnimatedCard>
     );
   };
 
-  const calcResult = () => { if (!calc) return ''; const amt = parseFloat(calc.amt) || 0; const r = rateOf(calc.cur); return calc.dir === 'toTWD' ? amt * r : amt / r; };
+  // ---- 記帳卡片 ----
+  const renderBought = it => {
+    const localUnit = it.boughtLocal != null ? it.boughtLocal : (it.price ? it.price.price : 0);
+    const twd = Math.round(localUnit * rateOf(it.country)) * it.qty;
+    return (
+      <View key={it.id} style={styles.ledgerItem}>
+        {it.image ? <TouchableOpacity onPress={() => setZoom({ url: it.image })}><Image source={{ uri: it.image }} style={styles.ledgerImg} /></TouchableOpacity> : <View style={styles.ledgerImg} />}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.ledgerName} numberOfLines={1}>{it.name}{it.qty > 1 ? ` ×${it.qty}` : ''}</Text>
+          <View style={styles.ledgerPriceRow}>
+            <Text style={styles.ledgerLocal}>{CO[it.country].cur}</Text>
+            <TextInput style={styles.ledgerInput} keyboardType="numeric" value={String(localUnit || '')} onChangeText={t => update(it.id, { boughtLocal: parseFloat(t.replace(/[^0-9.]/g, '')) || 0 })} accessibilityLabel="實付金額" />
+            <Text style={styles.ledgerTwd}>≈ NT${fmt(twd)}</Text>
+          </View>
+        </View>
+        <TouchableOpacity onPress={() => unbuy(it)} hitSlop={8} accessibilityLabel="移回待買" style={{ padding: 4 }}><Ionicons name="arrow-undo-outline" size={18} color={C.muted} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => remove(it.id)} hitSlop={8} accessibilityLabel="刪除" style={{ padding: 4 }}><Ionicons name="close" size={18} color="#cbbdb2" /></TouchableOpacity>
+      </View>
+    );
+  };
 
-  void fontsLoaded; // 觸發字體載入與打包；不阻擋渲染（載好後圖示自動出現）
+  const calcResult = () => { if (!calc) return ''; const amt = parseFloat(calc.amt) || 0; const r = rateOf(calc.cur); return calc.dir === 'toTWD' ? amt * r : amt / r; };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -257,78 +303,127 @@ export default function App() {
         <View style={[styles.heroBlob, styles.heroBlob2]} />
         <View style={styles.heroTop}>
           <Text style={styles.heroBrand}>免稅不是免費</Text>
-          <TouchableOpacity style={styles.calcBtn} onPress={() => setCalc({ cur: country, dir: 'toTWD', amt: '' })} activeOpacity={0.8} accessibilityLabel="匯率計算機">
-            <Ionicons name="calculator-outline" size={20} color="#fff" />
-          </TouchableOpacity>
+          <TouchableOpacity style={styles.calcBtn} onPress={() => setCalc({ cur: country, dir: 'toTWD', amt: '' })} activeOpacity={0.8} accessibilityLabel="匯率計算機"><Ionicons name="calculator-outline" size={20} color="#fff" /></TouchableOpacity>
         </View>
-
         <View style={styles.heroSeg}>
           {['jp', 'kr'].map(c => (
-            <TouchableOpacity key={c} style={[styles.heroSegBtn, country === c && styles.heroSegOn]} onPress={() => switchCountry(c)} activeOpacity={0.85}>
-              <Text style={[styles.heroSegTxt, country === c && styles.heroSegTxtOn]}>{CO[c].flag} {CO[c].label}</Text>
-            </TouchableOpacity>
+            <TouchableOpacity key={c} style={[styles.heroSegBtn, country === c && styles.heroSegOn]} onPress={() => switchCountry(c)} activeOpacity={0.85}><Text style={[styles.heroSegTxt, country === c && styles.heroSegTxtOn]}>{CO[c].flag} {CO[c].label}</Text></TouchableOpacity>
           ))}
           <Text style={styles.heroRate}>1{CO[country].curLabel}≈NT${rateOf(country).toFixed(country === 'kr' ? 3 : 2)}</Text>
         </View>
-
-        <Text style={styles.heroLabel}>本趟預估</Text>
-        <Text style={styles.heroTotal}>NT${fmt(totals.todo)}</Text>
-        <Text style={styles.heroSub}>待買 {totals.todoN} 件{totals.done > 0 ? ` ・ 已買 NT$${fmt(totals.done)}` : ''}</Text>
+        <Text style={styles.heroLabel}>{tab === 'list' ? '待買預估' : '已花費'}</Text>
+        <Text style={styles.heroTotal}>NT${fmt(tab === 'list' ? todoTotal : spentTotal)}</Text>
+        <Text style={styles.heroSub}>{tab === 'list' ? `待買 ${todoItems.length} 件` : `已買 ${boughtItems.length} 件 ・ ${ledger.length} 個店家`}</Text>
       </View>
 
-      {/* ADD BAR */}
-      <View style={styles.addBar}>
-        <View style={styles.addInputWrap}>
-          <Ionicons name="search" size={18} color={C.muted} />
-          <TextInput style={styles.addInput} placeholder="商品名／綽號／貼商品網址" placeholderTextColor="#bca99c" value={input} onChangeText={setInput} onSubmitEditing={addItem} returnKeyType="done" />
-        </View>
-        <TouchableOpacity style={styles.addBtn} onPress={addItem} activeOpacity={0.85} accessibilityLabel="加入"><Ionicons name="add" size={26} color="#fff" /></TouchableOpacity>
+      {/* 分頁 */}
+      <View style={styles.tabs}>
+        {[['list', '待買清單', 'list-outline'], ['ledger', '記帳', 'wallet-outline']].map(([k, label, icon]) => (
+          <TouchableOpacity key={k} style={[styles.tab, tab === k && styles.tabOn]} onPress={() => setTab(k)} activeOpacity={0.8}>
+            <Ionicons name={icon} size={18} color={tab === k ? C.rose : C.muted} />
+            <Text style={[styles.tabTxt, tab === k && styles.tabTxtOn]}>{label}{k === 'ledger' && boughtItems.length ? ` ${boughtItems.length}` : ''}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {items.length > 0 && (
-        <View style={styles.toolRow}>
-          <TouchableOpacity style={styles.toolChip} onPress={cycleSort} activeOpacity={0.8}><Ionicons name="swap-vertical" size={14} color={C.inkSoft} /><Text style={styles.toolChipTxt}>{SORT_LABEL[sort]}</Text></TouchableOpacity>
-          <TouchableOpacity style={[styles.toolChip, hideDone && styles.toolChipOn]} onPress={() => setHideDone(v => !v)} activeOpacity={0.8}><Ionicons name={hideDone ? 'eye-off' : 'eye-outline'} size={14} color={hideDone ? C.roseDeep : C.inkSoft} /><Text style={[styles.toolChipTxt, hideDone && styles.toolChipTxtOn]}>隱藏已買</Text></TouchableOpacity>
-        </View>
+      {tab === 'list' ? (
+        <>
+          <View style={styles.addBar}>
+            <View style={styles.addInputWrap}>
+              <Ionicons name="search" size={18} color={C.muted} />
+              <TextInput style={styles.addInput} placeholder="商品名／綽號／貼網址" placeholderTextColor="#bca99c" value={input} onChangeText={setInput} onSubmitEditing={() => { const it = addItem(); if (it) queryOne(it); }} returnKeyType="search" />
+              <TouchableOpacity onPress={() => scanImage(false)} hitSlop={8} accessibilityLabel="拍照或選圖搜尋"><Ionicons name="camera" size={20} color={C.rose} /></TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.addBtn} onPress={() => addItem()} activeOpacity={0.85} accessibilityLabel="加入清單"><Ionicons name="add" size={26} color="#fff" /></TouchableOpacity>
+          </View>
+
+          {todoItems.length > 0 && (
+            <View style={styles.toolRow}>
+              <TouchableOpacity style={styles.toolChip} onPress={cycleSort} activeOpacity={0.8}><Ionicons name="swap-vertical" size={14} color={C.inkSoft} /><Text style={styles.toolChipTxt}>{SORT_LABEL[sort]}</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.toolChip, styles.toolChipPrimary]} onPress={queryAll} activeOpacity={0.85}><Ionicons name="search" size={14} color="#fff" /><Text style={[styles.toolChipTxt, { color: '#fff' }]}>全部查價</Text></TouchableOpacity>
+            </View>
+          )}
+
+          <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
+            {todoItems.length === 0 && (
+              <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="bag-handle-outline" size={40} color={C.rose} /></View><Text style={styles.emptyBig}>還沒有東西</Text><Text style={styles.empty}>打商品名、綽號、貼網址，或按 📷 拍照{'\n'}加入後按「查價」就幫你查當地價＋換台幣</Text></View>
+            )}
+            {todoItems.map(renderTodo)}
+          </ScrollView>
+        </>
+      ) : (
+        <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
+          {boughtItems.length === 0 && (
+            <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="receipt-outline" size={38} color={C.rose} /></View><Text style={styles.emptyBig}>還沒有花費</Text><Text style={styles.empty}>在「待買清單」把買到的打「已買」{'\n'}就會移到這裡記帳、依店家算免稅門檻</Text></View>
+          )}
+          {ledger.map((g, gi) => {
+            const thr = TAXFREE[g.country] || 5000;
+            const reached = g.local >= thr;
+            const left = Math.max(0, thr - g.local);
+            return (
+              <View key={gi} style={styles.storeGroup}>
+                <View style={styles.storeHead}>
+                  <TouchableOpacity style={styles.storeNameBtn} onPress={() => setStoreEdit({ ids: g.items.map(i => i.id), val: g.store })} activeOpacity={0.7}>
+                    <Ionicons name="storefront-outline" size={15} color={C.inkSoft} />
+                    <Text style={styles.storeName}>{g.store || '未指定店家'}</Text>
+                    <Ionicons name="create-outline" size={13} color={C.muted} />
+                  </TouchableOpacity>
+                  <Text style={styles.storeTwd}>NT${fmt(g.twd)}</Text>
+                </View>
+                <View style={[styles.taxBar, reached && styles.taxBarOk]}>
+                  <Ionicons name={reached ? 'checkmark-circle' : 'information-circle-outline'} size={15} color={reached ? C.green : C.gold} />
+                  <Text style={[styles.taxTxt, reached && { color: C.green }]}>
+                    {reached ? `已達免稅門檻（${CO[g.country].cur}${fmt(thr)}）` : `距免稅門檻還差 ${CO[g.country].cur}${fmt(left)}（滿 ${CO[g.country].cur}${fmt(thr)}）`}
+                  </Text>
+                </View>
+                {g.items.map(renderBought)}
+              </View>
+            );
+          })}
+        </ScrollView>
       )}
 
-      <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
-        {items.length === 0 && (
-          <View style={styles.emptyWrap}>
-            <View style={styles.emptyIcon}><Ionicons name="bag-handle-outline" size={40} color={C.rose} /></View>
-            <Text style={styles.emptyBig}>還沒有東西</Text>
-            <Text style={styles.empty}>上面打商品名、綽號，或貼商品網址{'\n'}加入後自動幫你查當地價＋換台幣</Text>
-          </View>
-        )}
-        {todoItems.length > 0 && <Text style={styles.section}>待買 · {todoItems.length}</Text>}
-        {todoItems.map(renderCard)}
-        {!hideDone && doneItems.length > 0 && <Text style={[styles.section, { marginTop: 20 }]}>已買 · {doneItems.length}</Text>}
-        {!hideDone && doneItems.map(renderCard)}
-      </ScrollView>
+      {scanning && <View style={styles.scanOverlay}><ActivityIndicator size="large" color="#fff" /><Text style={styles.scanTxt}>辨識商品中…</Text></View>}
 
-      {/* 候選選擇器 */}
+      {/* 候選選擇器（含改關鍵字） */}
       <Modal visible={!!picker} transparent animationType="slide" onRequestClose={() => setPicker(null)}>
         <View style={styles.sheetBackdrop}>
           <View style={styles.sheet}>
             <View style={styles.grip} />
             <View style={styles.sheetHead}>
-              <View style={{ flex: 1 }}><Text style={styles.sheetKicker} numberOfLines={1}>選一個 · {picker?.name}</Text><Text style={styles.sheetTitle}>哪個是你要買的？</Text></View>
+              <View style={{ flex: 1 }}><Text style={styles.sheetKicker} numberOfLines={1}>{picker?.name}</Text><Text style={styles.sheetTitle}>選一個正確的</Text></View>
               <TouchableOpacity onPress={() => setPicker(null)} hitSlop={10}><Ionicons name="close" size={24} color={C.muted} /></TouchableOpacity>
             </View>
-            <ScrollView style={{ maxHeight: 440 }} showsVerticalScrollIndicator={false}>
+            <View style={styles.repickRow}>
+              <Ionicons name="search-outline" size={15} color={C.gold} />
+              <TextInput style={styles.repickInput} value={picker?.term} placeholder="找不到？改關鍵字" placeholderTextColor="#cdbdb0" onChangeText={t => setPicker(p => ({ ...p, term: t }))} />
+              <TouchableOpacity style={styles.repickBtn} onPress={repickWithTerm} activeOpacity={0.85}><Text style={styles.repickBtnTxt}>重搜</Text></TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
               {picker?.candidates.map((c, i) => (
                 <TouchableOpacity key={i} style={styles.cand} onPress={() => choosePick(c)} activeOpacity={0.7}>
                   {c.image ? <TouchableOpacity onPress={() => setZoom({ url: c.image })} activeOpacity={0.8}><Image source={{ uri: c.image }} style={styles.candImg} /></TouchableOpacity> : <View style={styles.candImg} />}
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.candTitle} numberOfLines={2}>{c.title}</Text>
-                    <Text style={styles.candPrice}>{picker.currency}{fmt(c.price)}<Text style={styles.candTwd}>　NT${fmt(c.twd)}</Text></Text>
-                  </View>
+                  <View style={{ flex: 1 }}><Text style={styles.candTitle} numberOfLines={2}>{c.title}</Text><Text style={styles.candPrice}>{picker.currency}{fmt(c.price)}<Text style={styles.candTwd}>　NT${fmt(c.twd)}</Text></Text></View>
                   <View style={styles.candPick}><Text style={styles.candPickTxt}>選</Text></View>
                 </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* 店家編輯 */}
+      <Modal visible={!!storeEdit} transparent animationType="fade" onRequestClose={() => setStoreEdit(null)}>
+        <TouchableOpacity style={styles.centerBackdrop} activeOpacity={1} onPress={() => setStoreEdit(null)}>
+          <View style={styles.storeModal} onStartShouldSetResponder={() => true}>
+            <Text style={styles.sheetTitle}>這批在哪家買？</Text>
+            <TextInput style={styles.storeInput} value={storeEdit?.val} placeholder="店家名稱，例如 唐吉訶德 梅田店" placeholderTextColor="#cdbdb0" autoFocus onChangeText={t => setStoreEdit(s => ({ ...s, val: t }))} />
+            {stores.length > 0 && (
+              <View style={styles.storeChips}>{stores.map(s => <TouchableOpacity key={s} style={styles.storeChip} onPress={() => setStoreEdit(e => ({ ...e, val: s }))}><Text style={styles.storeChipTxt}>{s}</Text></TouchableOpacity>)}</View>
+            )}
+            <TouchableOpacity style={styles.storeSave} onPress={() => { const v = (storeEdit.val || '').trim(); setItems(prev => prev.map(it => storeEdit.ids.includes(it.id) ? { ...it, store: v } : it)); rememberStore(v); setStoreEdit(null); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
+          </View>
+        </TouchableOpacity>
       </Modal>
 
       {/* 圖片放大 */}
@@ -347,28 +442,16 @@ export default function App() {
         <View style={styles.sheetBackdrop}>
           <View style={styles.sheet}>
             <View style={styles.grip} />
-            <View style={styles.sheetHead}>
-              <View><Text style={styles.sheetKicker}>匯率計算機</Text><Text style={styles.sheetTitle}>快速換算</Text></View>
-              <TouchableOpacity onPress={() => setCalc(null)} hitSlop={10}><Ionicons name="close" size={24} color={C.muted} /></TouchableOpacity>
-            </View>
+            <View style={styles.sheetHead}><View><Text style={styles.sheetKicker}>匯率計算機</Text><Text style={styles.sheetTitle}>快速換算</Text></View><TouchableOpacity onPress={() => setCalc(null)} hitSlop={10}><Ionicons name="close" size={24} color={C.muted} /></TouchableOpacity></View>
             {calc && (
               <View style={{ paddingTop: 6 }}>
                 <View style={styles.calcRow}>
-                  <View style={styles.calcSeg}>
-                    {['jp', 'kr'].map(c => (
-                      <TouchableOpacity key={c} style={[styles.calcSegBtn, calc.cur === c && styles.calcSegOn]} onPress={() => setCalc({ ...calc, cur: c })} activeOpacity={0.85}>
-                        <Text style={[styles.calcSegTxt, calc.cur === c && styles.calcSegTxtOn]}>{CO[c].flag} {CO[c].curLabel}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <TouchableOpacity style={styles.swapBtn} onPress={() => setCalc({ ...calc, dir: calc.dir === 'toTWD' ? 'fromTWD' : 'toTWD' })} activeOpacity={0.8}><Ionicons name="swap-horizontal" size={22} color={C.rose} /></TouchableOpacity>
+                  <View style={styles.calcSeg}>{['jp', 'kr'].map(c => <TouchableOpacity key={c} style={[styles.calcSegBtn, calc.cur === c && styles.calcSegOn]} onPress={() => setCalc({ ...calc, cur: c })}><Text style={[styles.calcSegTxt, calc.cur === c && styles.calcSegTxtOn]}>{CO[c].flag} {CO[c].curLabel}</Text></TouchableOpacity>)}</View>
+                  <TouchableOpacity style={styles.swapBtn} onPress={() => setCalc({ ...calc, dir: calc.dir === 'toTWD' ? 'fromTWD' : 'toTWD' })} accessibilityLabel="切換方向"><Ionicons name="swap-horizontal" size={22} color={C.rose} /></TouchableOpacity>
                 </View>
                 <Text style={styles.calcDirTxt}>{calc.dir === 'toTWD' ? `${CO[calc.cur].curLabel} → 台幣` : `台幣 → ${CO[calc.cur].curLabel}`}</Text>
                 <TextInput style={styles.calcInput} keyboardType="numeric" placeholder="0" placeholderTextColor="#cdbdb0" value={calc.amt} onChangeText={t => setCalc({ ...calc, amt: t.replace(/[^0-9.]/g, '') })} autoFocus />
-                <View style={styles.calcResult}>
-                  <Text style={styles.calcResultLabel}>{calc.dir === 'toTWD' ? '約等於' : `約等於 ${CO[calc.cur].curLabel}`}</Text>
-                  <Text style={styles.calcResultNum}>{calc.dir === 'toTWD' ? 'NT$' : CO[calc.cur].cur}{fmt(calcResult())}</Text>
-                </View>
+                <View style={styles.calcResult}><Text style={styles.calcResultLabel}>{calc.dir === 'toTWD' ? '約等於' : `約等於 ${CO[calc.cur].curLabel}`}</Text><Text style={styles.calcResultNum}>{calc.dir === 'toTWD' ? 'NT$' : CO[calc.cur].cur}{fmt(calcResult())}</Text></View>
                 <Text style={styles.calcRate}>參考匯率 1 {CO[calc.cur].curLabel} ≈ NT${rateOf(calc.cur).toFixed(calc.cur === 'kr' ? 3 : 2)}</Text>
               </View>
             )}
@@ -379,62 +462,54 @@ export default function App() {
   );
 }
 
-const C = {
-  bg: '#F6F0EA', surface: '#FFFFFF', ink: '#2E2420', inkSoft: '#7A6E66', muted: '#A89C92',
-  rose: '#E0567C', roseDeep: '#C53E63', roseSoft: '#FCE7EE', gold: '#C39A5E', line: '#ECE1D8',
-};
+const C = { bg: '#F6F0EA', surface: '#FFFFFF', ink: '#2E2420', inkSoft: '#7A6E66', muted: '#A89C92', rose: '#E0567C', roseDeep: '#C53E63', roseSoft: '#FCE7EE', gold: '#BE8A3C', green: '#3F9E6E', line: '#ECE1D8' };
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg, paddingTop: Platform.OS === 'android' ? 28 : 0 },
-
-  hero: { backgroundColor: C.rose, paddingHorizontal: 22, paddingTop: 18, paddingBottom: 20, borderBottomLeftRadius: 26, borderBottomRightRadius: 26, overflow: 'hidden' },
+  hero: { backgroundColor: C.rose, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 18, borderBottomLeftRadius: 24, borderBottomRightRadius: 24, overflow: 'hidden' },
   heroBlob: { position: 'absolute', borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.10)' },
-  heroBlob1: { width: 180, height: 180, top: -70, right: -40 },
-  heroBlob2: { width: 120, height: 120, bottom: -50, left: -30, backgroundColor: 'rgba(255,255,255,0.07)' },
+  heroBlob1: { width: 170, height: 170, top: -66, right: -36 },
+  heroBlob2: { width: 110, height: 110, bottom: -46, left: -28, backgroundColor: 'rgba(255,255,255,0.07)' },
   heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  heroBrand: { color: '#fff', fontSize: 20, fontWeight: '900', letterSpacing: 1.5 },
-  calcBtn: { width: 42, height: 42, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
-
-  heroSeg: { flexDirection: 'row', alignItems: 'center', marginTop: 16, gap: 8 },
-  heroSegBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.16)' },
+  heroBrand: { color: '#fff', fontSize: 19, fontWeight: '900', letterSpacing: 1.5 },
+  calcBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  heroSeg: { flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 8 },
+  heroSegBtn: { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.16)' },
   heroSegOn: { backgroundColor: '#fff' },
-  heroSegTxt: { color: 'rgba(255,255,255,0.92)', fontSize: 13.5, fontWeight: '800' },
+  heroSegTxt: { color: 'rgba(255,255,255,0.92)', fontSize: 13, fontWeight: '800' },
   heroSegTxtOn: { color: C.roseDeep },
   heroRate: { color: 'rgba(255,255,255,0.85)', fontSize: 11, fontFamily: MONO, marginLeft: 'auto' },
+  heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700', letterSpacing: 2, marginTop: 16 },
+  heroTotal: { color: '#fff', fontSize: 38, fontWeight: '900', fontFamily: MONO, marginTop: 2 },
+  heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 3, fontWeight: '600' },
 
-  heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700', letterSpacing: 2, marginTop: 18 },
-  heroTotal: { color: '#fff', fontSize: 40, fontWeight: '900', fontFamily: MONO, marginTop: 2, letterSpacing: 0.5 },
-  heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 4, fontWeight: '600' },
+  tabs: { flexDirection: 'row', marginHorizontal: 18, marginTop: 14, backgroundColor: C.surface, borderRadius: 14, padding: 4, borderWidth: 1.5, borderColor: C.line },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 10 },
+  tabOn: { backgroundColor: C.roseSoft },
+  tabTxt: { color: C.muted, fontSize: 14, fontWeight: '800' },
+  tabTxtOn: { color: C.roseDeep },
 
-  addBar: { flexDirection: 'row', paddingHorizontal: 18, gap: 10, marginTop: 16 },
+  addBar: { flexDirection: 'row', paddingHorizontal: 18, gap: 10, marginTop: 14 },
   addInputWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.surface, borderRadius: 14, paddingHorizontal: 14, borderWidth: 1.5, borderColor: C.line },
   addInput: { flex: 1, paddingVertical: 13, color: C.ink, fontSize: 15 },
   addBtn: { width: 52, backgroundColor: C.rose, borderRadius: 14, alignItems: 'center', justifyContent: 'center', shadowColor: C.rose, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
-
-  toolRow: { flexDirection: 'row', gap: 9, paddingHorizontal: 18, marginTop: 13 },
-  toolChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.line, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
-  toolChipOn: { backgroundColor: C.roseSoft, borderColor: C.rose },
+  toolRow: { flexDirection: 'row', gap: 9, paddingHorizontal: 18, marginTop: 12 },
+  toolChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.line, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
+  toolChipPrimary: { backgroundColor: C.rose, borderColor: C.rose, marginLeft: 'auto' },
   toolChipTxt: { color: C.inkSoft, fontSize: 12.5, fontWeight: '700' },
-  toolChipTxtOn: { color: C.roseDeep },
 
   list: { flex: 1, paddingHorizontal: 18, marginTop: 14 },
-  section: { color: C.inkSoft, fontSize: 12, fontWeight: '800', letterSpacing: 2, marginBottom: 10, fontFamily: MONO },
-  emptyWrap: { alignItems: 'center', marginTop: 50 },
-  emptyIcon: { width: 84, height: 84, borderRadius: 26, backgroundColor: C.roseSoft, alignItems: 'center', justifyContent: 'center' },
-  emptyBig: { color: C.ink, fontSize: 20, fontWeight: '800', letterSpacing: 1, marginTop: 16 },
+  emptyWrap: { alignItems: 'center', marginTop: 46 },
+  emptyIcon: { width: 82, height: 82, borderRadius: 26, backgroundColor: C.roseSoft, alignItems: 'center', justifyContent: 'center' },
+  emptyBig: { color: C.ink, fontSize: 20, fontWeight: '800', letterSpacing: 1, marginTop: 14 },
   empty: { color: C.muted, textAlign: 'center', marginTop: 8, fontSize: 13.5, lineHeight: 23 },
 
   card: { backgroundColor: C.surface, borderRadius: 20, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: C.line, shadowColor: '#7a5a44', shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
-  cardDone: { backgroundColor: '#FAF6F1', opacity: 0.68 },
   rowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 11 },
-  check: { width: 26, height: 26, borderRadius: 9, borderWidth: 2, borderColor: '#DAD0C7', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  checkOn: { backgroundColor: C.rose, borderColor: C.rose },
   name: { flex: 1, color: C.ink, fontSize: 16.5, fontWeight: '800', lineHeight: 22 },
-  nameDone: { textDecorationLine: 'line-through', color: C.muted },
-
-  body: { flexDirection: 'row', gap: 13, marginTop: 13 },
-  imgWrap: { width: 96, height: 96, borderRadius: 16, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  img: { width: 96, height: 96 },
+  body: { flexDirection: 'row', gap: 13, marginTop: 12 },
+  imgWrap: { width: 90, height: 90, borderRadius: 16, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  img: { width: 90, height: 90 },
   imgEmpty: { alignItems: 'center', gap: 2 },
   imgEmptyTxt: { fontSize: 11, color: C.muted, fontWeight: '700' },
   bodyRight: { flex: 1, justifyContent: 'space-between' },
@@ -446,41 +521,72 @@ const styles = StyleSheet.create({
   miniSegTxt: { fontSize: 14, opacity: 0.4 },
   miniSegTxtOn: { opacity: 1 },
   qty: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  qtyBtn: { width: 30, height: 30, borderRadius: 9, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
+  qtyBtn: { width: 32, height: 32, borderRadius: 9, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
   qtyNum: { color: C.ink, fontSize: 15, fontWeight: '800', minWidth: 20, textAlign: 'center', fontFamily: MONO },
-
-  priceRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 11 },
-  priceTag: { backgroundColor: C.rose, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 8, flexDirection: 'row', alignItems: 'baseline' },
+  priceRow: { flexDirection: 'row', alignItems: 'center', marginTop: 13, gap: 10 },
+  priceTag: { backgroundColor: C.rose, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'baseline' },
   priceTagCur: { color: 'rgba(255,255,255,0.9)', fontSize: 11, fontWeight: '800', fontFamily: MONO },
-  priceTagNum: { color: '#fff', fontSize: 19, fontWeight: '900', fontFamily: MONO, marginLeft: 1 },
+  priceTagNum: { color: '#fff', fontSize: 18, fontWeight: '900', fontFamily: MONO, marginLeft: 1 },
   priceMid: { flex: 1 },
   localPrice: { color: C.inkSoft, fontSize: 13, fontWeight: '700', fontFamily: MONO },
-  changeRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 },
-  pickedTitle: { color: C.muted, fontSize: 11, flexShrink: 1 },
+  pickedTitle: { color: C.muted, fontSize: 11, marginTop: 2 },
   loadingTxt: { color: C.muted, fontSize: 14, marginLeft: 9, fontWeight: '600' },
   noPrice: { color: '#c2b4a8', fontSize: 13.5 },
   errTxt: { color: C.roseDeep, fontSize: 13, fontWeight: '600' },
   flex1: { flex: 1 },
-  reBtn: { width: 38, height: 38, borderRadius: 11, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
+  changeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.roseSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  changeBtnTxt: { color: C.roseDeep, fontWeight: '800', fontSize: 13 },
   queryBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.rose, borderRadius: 11, paddingHorizontal: 18, paddingVertical: 10 },
   queryBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 1 },
+  doneBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 11 },
+  doneBtnTxt: { color: C.green, fontWeight: '800', fontSize: 13.5 },
 
-  termRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 11 },
-  termInput: { flex: 1, backgroundColor: C.roseSoft, borderRadius: 9, paddingHorizontal: 11, paddingVertical: 7, fontSize: 13.5, color: C.ink },
+  // 記帳
+  storeGroup: { backgroundColor: C.surface, borderRadius: 18, padding: 14, marginBottom: 13, borderWidth: 1, borderColor: C.line },
+  storeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  storeNameBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  storeName: { color: C.ink, fontSize: 15, fontWeight: '800' },
+  storeTwd: { color: C.rose, fontSize: 16, fontWeight: '900', fontFamily: MONO },
+  taxBar: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBF3E4', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, marginTop: 9 },
+  taxBarOk: { backgroundColor: '#E9F5EE' },
+  taxTxt: { color: C.gold, fontSize: 12, fontWeight: '700', flex: 1 },
+  ledgerItem: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 11 },
+  ledgerImg: { width: 44, height: 44, borderRadius: 10, backgroundColor: C.bg },
+  ledgerName: { color: C.ink, fontSize: 14, fontWeight: '700' },
+  ledgerPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  ledgerLocal: { color: C.inkSoft, fontSize: 13, fontFamily: MONO, fontWeight: '700' },
+  ledgerInput: { minWidth: 56, backgroundColor: C.bg, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4, fontSize: 14, color: C.ink, fontFamily: MONO, fontWeight: '700' },
+  ledgerTwd: { color: C.muted, fontSize: 12, fontFamily: MONO },
+
+  scanOverlay: { position: 'absolute', inset: 0, backgroundColor: 'rgba(46,36,32,0.6)', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  scanTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(46,36,32,0.55)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: C.surface, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 20, paddingBottom: 30 },
   grip: { width: 42, height: 4, borderRadius: 2, backgroundColor: C.line, alignSelf: 'center', marginBottom: 14 },
-  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 12 },
-  sheetKicker: { color: C.rose, fontSize: 11.5, letterSpacing: 0.5, fontWeight: '800' },
-  sheetTitle: { fontSize: 20, fontWeight: '900', color: C.ink, marginTop: 3, letterSpacing: 0.5 },
+  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 12 },
+  sheetKicker: { color: C.rose, fontSize: 11.5, fontWeight: '800' },
+  sheetTitle: { fontSize: 19, fontWeight: '900', color: C.ink, marginTop: 3 },
+  repickRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.bg, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 12 },
+  repickInput: { flex: 1, paddingVertical: 7, fontSize: 14, color: C.ink },
+  repickBtn: { backgroundColor: C.rose, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 7 },
+  repickBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 13 },
   cand: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: C.line },
   candImg: { width: 56, height: 56, borderRadius: 12, backgroundColor: C.bg },
   candTitle: { color: C.ink, fontSize: 14, fontWeight: '600', lineHeight: 19 },
   candPrice: { color: C.inkSoft, fontSize: 14, fontWeight: '700', marginTop: 4, fontFamily: MONO },
   candTwd: { color: C.rose, fontSize: 14, fontWeight: '800', fontFamily: MONO },
   candPick: { backgroundColor: C.roseSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
-  candPickTxt: { color: C.roseDeep, fontWeight: '800', fontSize: 13, letterSpacing: 1 },
+  candPickTxt: { color: C.roseDeep, fontWeight: '800', fontSize: 13 },
+
+  centerBackdrop: { flex: 1, backgroundColor: 'rgba(46,36,32,0.55)', alignItems: 'center', justifyContent: 'center', padding: 26 },
+  storeModal: { backgroundColor: C.surface, borderRadius: 20, padding: 20, width: '100%' },
+  storeInput: { backgroundColor: C.bg, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: C.ink, marginTop: 12 },
+  storeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  storeChip: { backgroundColor: C.roseSoft, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  storeChipTxt: { color: C.roseDeep, fontSize: 13, fontWeight: '700' },
+  storeSave: { backgroundColor: C.rose, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 16 },
+  storeSaveTxt: { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: 1 },
 
   zoomBackdrop: { flex: 1, backgroundColor: 'rgba(28,22,18,0.95)', alignItems: 'center', justifyContent: 'center', padding: 16 },
   zoomImg: { width: '100%', height: '78%' },
