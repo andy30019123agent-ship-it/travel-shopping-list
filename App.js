@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  SafeAreaView, View, Text, TextInput, TouchableOpacity, Image,
+  SafeAreaView, View, Text, TextInput, TouchableOpacity, Image, Modal,
   ScrollView, StyleSheet, StatusBar, Platform, ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,67 +15,43 @@ const CURRENCY = {
   jp: { flag: '🇯🇵', label: '日本' },
   kr: { flag: '🇰🇷', label: '韓國' },
 };
-
 const fmt = n => (n == null ? '' : n.toLocaleString('en-US'));
-const median = arr => {
-  if (!arr.length) return null;
-  const s = [...arr].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
-};
-// 濾掉整箱/批發/配件的離群值，取「典型單盒價」
-const typicalPrices = prices => {
-  const v = prices.filter(p => p > 0).sort((a, b) => a - b);
-  if (v.length < 3) return v;
-  const med = median(v);
-  return v.filter(p => p >= med * 0.4 && p <= med * 2.2);
-};
+const enc = encodeURIComponent;
 
-async function fetchPriceFor(item) {
-  const q = item.term
-    ? `term=${encodeURIComponent(item.term)}`
-    : `item=${encodeURIComponent(item.name)}`;
+// 撈候選商品：韓國用後端、日本用前端直連樂天
+async function fetchCandidates(item) {
+  const q = item.term ? `term=${enc(item.term)}` : `item=${enc(item.name)}`;
   const res = await fetch(`${WORKER_URL}/price?country=${item.country}&${q}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || '查詢失敗');
+  const term = (data.terms && data.terms[0]) || item.term || '';
+  const currency = data.currency || (item.country === 'kr' ? '₩' : '¥');
+  const rate = data.rate || (item.country === 'kr' ? 0.023 : 0.21);
 
+  let cands = [];
   if (item.country === 'kr') {
-    return {
-      term: data.term,
-      image: item.imageManual ? item.image : (data.image || item.image),
-      price: data.typical
-        ? { typical: data.typical, min: data.min, max: data.max, twd: data.twd, currency: data.currency, count: data.count }
-        : null,
-    };
-  }
-
-  // 日本：用翻譯詞由前端直接查樂天（瀏覽器自帶 Referer 才過得了）
-  const term = data.term;
-  const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
-    `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}` +
-    `&keyword=${encodeURIComponent(term)}&hits=30&format=json`;
-  const rk = await fetch(url);
-  if (!rk.ok) throw new Error(`樂天查詢失敗 (${rk.status})`);
-  const rj = await rk.json();
-  const items = (rj.Items || []).map(x => x.Item || x);
-  const prices = items.map(i => i.itemPrice).filter(p => p > 0);
-  const typ = typicalPrices(prices);
-  if (!typ.length) return { term, image: item.image, price: null };
-  const typical = median(typ);
-  let image = item.imageManual ? item.image : '';
-  if (!item.imageManual) {
-    let best = Infinity;
+    cands = (data.candidates || []).map(c => ({ title: c.title, price: c.price, image: c.image, twd: Math.round(c.price * rate) }));
+  } else {
+    const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
+      `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${enc(term)}&hits=20&format=json`;
+    const rk = await fetch(url);
+    if (!rk.ok) throw new Error(`樂天查詢失敗 (${rk.status})`);
+    const rj = await rk.json();
+    const items = (rj.Items || []).map(x => x.Item || x);
+    const seen = new Set();
     for (const i of items) {
-      const p = i.itemPrice;
-      const img = i.mediumImageUrls?.[0]?.imageUrl || i.smallImageUrls?.[0]?.imageUrl;
-      if (p > 0 && img && Math.abs(p - typical) < best) { best = Math.abs(p - typical); image = img; }
+      const title = i.itemName || '';
+      const price = i.itemPrice;
+      const image = i.mediumImageUrls?.[0]?.imageUrl || i.smallImageUrls?.[0]?.imageUrl || '';
+      if (!title || !price) continue;
+      const key = title.slice(0, 12);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      cands.push({ title, price, image, twd: Math.round(price * rate) });
+      if (cands.length >= 10) break;
     }
   }
-  return {
-    term,
-    image,
-    price: { typical, min: typ[0], max: typ[typ.length - 1], twd: Math.round(typical * (data.rate || 0.21)), currency: '¥', count: typ.length },
-  };
+  return { term, currency, candidates: cands };
 }
 
 export default function App() {
@@ -83,6 +59,7 @@ export default function App() {
   const [input, setInput] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState({});
+  const [picker, setPicker] = useState(null); // { itemId, currency, candidates }
 
   useEffect(() => {
     AsyncStorage.getItem(STORE_KEY).then(raw => {
@@ -111,10 +88,14 @@ export default function App() {
   async function queryOne(item) {
     setBusy(b => ({ ...b, [item.id]: true }));
     try {
-      const r = await fetchPriceFor(item);
-      update(item.id, { ...r, noResult: !r.price });
+      const { term, currency, candidates } = await fetchCandidates(item);
+      update(item.id, { term });
+      if (!candidates.length) {
+        update(item.id, { noResult: true });
+      } else {
+        setPicker({ itemId: item.id, currency, candidates });
+      }
     } catch (e) {
-      update(item.id, { price: null });
       setBusy(b => ({ ...b, [item.id]: 'err' }));
       setTimeout(() => setBusy(b => ({ ...b, [item.id]: false })), 2500);
       return;
@@ -122,21 +103,19 @@ export default function App() {
     setBusy(b => ({ ...b, [item.id]: false }));
   }
 
-  async function queryAll() {
-    for (const it of items) {
-      // 用最新的 item 內容
-      // eslint-disable-next-line no-await-in-loop
-      await queryOne(it);
-    }
+  function choosePick(c) {
+    const { itemId, currency } = picker;
+    setItems(prev => prev.map(it => it.id === itemId
+      ? { ...it, price: { price: c.price, twd: c.twd, currency, title: c.title }, image: it.imageManual ? it.image : (c.image || it.image), noResult: false }
+      : it));
+    setPicker(null);
   }
 
   async function pickImage(id) {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-      if (!res.canceled && res.assets?.[0]) {
-        update(id, { image: res.assets[0].uri, imageManual: true });
-      }
-    } catch (e) { /* 使用者取消或不支援 */ }
+      if (!res.canceled && res.assets?.[0]) update(id, { image: res.assets[0].uri, imageManual: true });
+    } catch (e) { /* ignore */ }
   }
 
   const totals = useMemo(() => {
@@ -172,18 +151,11 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {items.length > 0 && (
-        <TouchableOpacity style={styles.refreshAll} onPress={queryAll}>
-          <Text style={styles.refreshAllTxt}>↻ 全部查價</Text>
-        </TouchableOpacity>
-      )}
-
       <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 24 }}>
         {items.length === 0 && (
           <Text style={styles.empty}>清單還是空的{'\n'}上面加入第一個想買的東西吧 🛍️</Text>
         )}
         {items.map(it => {
-          const cur = CURRENCY[it.country];
           const state = busy[it.id];
           return (
             <View key={it.id} style={[styles.card, it.purchased && styles.cardDone]}>
@@ -195,13 +167,11 @@ export default function App() {
                 >
                   <Text style={styles.checkTxt}>{it.purchased ? '✓' : ''}</Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity style={styles.thumbWrap} onPress={() => pickImage(it.id)}>
                   {it.image
                     ? <Image source={{ uri: it.image }} style={styles.thumb} />
                     : <Text style={styles.thumbPlus}>📷</Text>}
                 </TouchableOpacity>
-
                 <Text style={[styles.name, it.purchased && styles.nameDone]}>{it.name}</Text>
                 <TouchableOpacity onPress={() => remove(it.id)} hitSlop={8}>
                   <Text style={styles.del}>✕</Text>
@@ -222,7 +192,7 @@ export default function App() {
                   <TextInput
                     style={styles.termInput}
                     value={it.term}
-                    placeholder="翻譯後的搜尋字（可改）"
+                    placeholder="翻譯後的搜尋字（可改後再查）"
                     placeholderTextColor="#bdbab2"
                     onChangeText={t => update(it.id, { term: t })}
                   />
@@ -243,13 +213,11 @@ export default function App() {
                   ))}
                 </View>
                 <View style={styles.qty}>
-                  <TouchableOpacity style={styles.qtyBtn}
-                    onPress={() => update(it.id, { qty: Math.max(1, it.qty - 1) })}>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => update(it.id, { qty: Math.max(1, it.qty - 1) })}>
                     <Text style={styles.qtyBtnTxt}>－</Text>
                   </TouchableOpacity>
                   <Text style={styles.qtyNum}>{it.qty}</Text>
-                  <TouchableOpacity style={styles.qtyBtn}
-                    onPress={() => update(it.id, { qty: it.qty + 1 })}>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => update(it.id, { qty: it.qty + 1 })}>
                     <Text style={styles.qtyBtnTxt}>＋</Text>
                   </TouchableOpacity>
                 </View>
@@ -259,13 +227,11 @@ export default function App() {
                 <View style={{ flex: 1 }}>
                   {it.price ? (
                     <>
-                      <Text style={styles.priceMed}>
-                        常見價 {it.price.currency}{fmt(it.price.typical)}
+                      <Text style={styles.priceMain}>
+                        {it.price.currency}{fmt(it.price.price)}
                         <Text style={styles.twd}>　約 NT${fmt(it.price.twd)}</Text>
                       </Text>
-                      <Text style={styles.priceRange}>
-                        範圍 {it.price.currency}{fmt(it.price.min)}–{it.price.currency}{fmt(it.price.max)} ・ {it.price.count} 筆
-                      </Text>
+                      <Text style={styles.pickedTitle} numberOfLines={1}>✓ {it.price.title}</Text>
                     </>
                   ) : state === 'err' ? (
                     <Text style={styles.errTxt}>連線出錯，請再按一次查價</Text>
@@ -282,7 +248,7 @@ export default function App() {
                 >
                   {state === true
                     ? <ActivityIndicator size="small" color="#e25a92" />
-                    : <Text style={styles.refreshBtnTxt}>↻ 查價</Text>}
+                    : <Text style={styles.refreshBtnTxt}>{it.price ? '↻ 重選' : '🔍 查價'}</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -300,6 +266,36 @@ export default function App() {
           <Text style={styles.footDone}>NT${fmt(totals.done)}</Text>
         </View>
       </View>
+
+      {/* 候選商品選擇器 */}
+      <Modal visible={!!picker} transparent animationType="slide" onRequestClose={() => setPicker(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>選擇正確的商品</Text>
+              <TouchableOpacity onPress={() => setPicker(null)} hitSlop={8}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalHint}>點一下最接近你要買的那個 👇</Text>
+            <ScrollView style={{ maxHeight: 460 }}>
+              {picker?.candidates.map((c, i) => (
+                <TouchableOpacity key={i} style={styles.cand} onPress={() => choosePick(c)}>
+                  {c.image
+                    ? <Image source={{ uri: c.image }} style={styles.candImg} />
+                    : <View style={styles.candImg} />}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.candTitle} numberOfLines={2}>{c.title}</Text>
+                    <Text style={styles.candPrice}>
+                      {picker.currency}{fmt(c.price)} <Text style={styles.candTwd}>約 NT${fmt(c.twd)}</Text>
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -317,24 +313,14 @@ const styles = StyleSheet.create({
   sub: { color: C.muted, fontSize: 13, marginTop: 4, letterSpacing: 0.3 },
 
   addBar: { flexDirection: 'row', paddingHorizontal: 20, gap: 8 },
-  addInput: {
-    flex: 1, backgroundColor: C.card, borderRadius: 12, paddingHorizontal: 15,
-    paddingVertical: 13, color: C.text, fontSize: 16, borderWidth: 1, borderColor: C.border,
-  },
+  addInput: { flex: 1, backgroundColor: C.card, borderRadius: 12, paddingHorizontal: 15, paddingVertical: 13, color: C.text, fontSize: 16, borderWidth: 1, borderColor: C.border },
   addBtn: { backgroundColor: C.accent, borderRadius: 12, paddingHorizontal: 22, justifyContent: 'center' },
   addBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 16 },
 
-  refreshAll: { alignSelf: 'flex-end', marginRight: 20, marginTop: 12 },
-  refreshAllTxt: { color: C.accent, fontWeight: '600', fontSize: 13 },
-
-  list: { flex: 1, paddingHorizontal: 20, marginTop: 8 },
+  list: { flex: 1, paddingHorizontal: 20, marginTop: 12 },
   empty: { color: C.muted, textAlign: 'center', marginTop: 70, fontSize: 15, lineHeight: 26 },
 
-  card: {
-    backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 12,
-    borderWidth: 1, borderColor: C.border,
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 1,
-  },
+  card: { backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: C.border, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 1 },
   cardDone: { backgroundColor: '#fbfaf8', opacity: 0.7 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 2, borderColor: '#d6d3cc', alignItems: 'center', justifyContent: 'center' },
@@ -347,10 +333,7 @@ const styles = StyleSheet.create({
   nameDone: { textDecorationLine: 'line-through', color: C.muted },
   del: { color: '#c2bfb7', fontSize: 16, paddingHorizontal: 2 },
 
-  note: {
-    marginTop: 10, backgroundColor: C.bg, borderRadius: 10, paddingHorizontal: 12,
-    paddingVertical: 9, fontSize: 14, color: C.text, borderWidth: 1, borderColor: C.border,
-  },
+  note: { marginTop: 10, backgroundColor: C.bg, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: C.text, borderWidth: 1, borderColor: C.border },
   termRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   termLabel: { fontSize: 14 },
   termInput: { flex: 1, backgroundColor: C.accentSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, fontSize: 14, color: C.text },
@@ -367,9 +350,9 @@ const styles = StyleSheet.create({
   qtyNum: { color: C.text, fontSize: 16, fontWeight: '700', minWidth: 22, textAlign: 'center' },
 
   rowBot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 11, gap: 10 },
-  priceMed: { color: C.text, fontSize: 16, fontWeight: '700' },
+  priceMain: { color: C.text, fontSize: 17, fontWeight: '800' },
   twd: { color: C.accent, fontWeight: '800' },
-  priceRange: { color: C.muted, fontSize: 12, marginTop: 2 },
+  pickedTitle: { color: C.muted, fontSize: 11, marginTop: 2 },
   noPrice: { color: '#bdbab2', fontSize: 14, fontStyle: 'italic' },
   errTxt: { color: '#c2557a', fontSize: 13 },
   refreshBtn: { backgroundColor: C.accentSoft, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 8, minWidth: 64, alignItems: 'center' },
@@ -380,4 +363,16 @@ const styles = StyleSheet.create({
   footLabel: { color: C.muted, fontSize: 12 },
   footTodo: { color: C.accent, fontSize: 22, fontWeight: '800' },
   footDone: { color: C.green, fontSize: 22, fontWeight: '800' },
+
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(31,31,29,0.45)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: C.card, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 28 },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: C.text },
+  modalClose: { fontSize: 18, color: C.muted },
+  modalHint: { color: C.muted, fontSize: 13, marginTop: 4, marginBottom: 12 },
+  cand: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  candImg: { width: 52, height: 52, borderRadius: 8, backgroundColor: C.bg },
+  candTitle: { color: C.text, fontSize: 14, fontWeight: '600' },
+  candPrice: { color: C.text, fontSize: 15, fontWeight: '700', marginTop: 3 },
+  candTwd: { color: C.accent, fontSize: 13, fontWeight: '700' },
 });
