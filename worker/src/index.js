@@ -105,6 +105,23 @@ async function guessTerms(env, item, country) {
   }
 }
 
+// 貼網址 → 抓商品頁標題當搜尋來源
+async function extractFromUrl(url) {
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenshuiBot/1.0)' } });
+    if (!r.ok) return '';
+    const html = await r.text();
+    let title = '';
+    const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)
+      || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+    if (og) title = og[1];
+    else { const t = html.match(/<title[^>]*>([^<]+)/i); if (t) title = t[1]; }
+    title = title.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim();
+    title = title.split(/\s*[|｜\-–—]\s*/)[0].trim(); // 去掉站名後綴
+    return title;
+  } catch { return ''; }
+}
+
 async function rate(from) {
   try {
     const j = await (await fetch(`https://open.er-api.com/v6/latest/${from}`)).json();
@@ -145,22 +162,28 @@ export default {
     const url = new URL(request.url);
     if (url.pathname !== '/price') return json({ ok: false, error: 'use /price?item=..&country=jp|kr' }, 404);
 
-    const item = (url.searchParams.get('item') || '').trim();
+    let item = (url.searchParams.get('item') || '').trim();
     const country = url.searchParams.get('country') === 'kr' ? 'kr' : 'jp';
     const givenTerm = (url.searchParams.get('term') || '').trim();
     if (!item && !givenTerm) return json({ ok: false, error: 'missing item' }, 400);
 
     try {
+      // 貼網址 → 先抓商品標題當搜尋字
+      let fromUrl = '';
+      if (/^https?:\/\//i.test(item)) {
+        fromUrl = await extractFromUrl(item);
+        if (fromUrl) item = fromUrl;
+      }
       const terms = givenTerm ? [givenTerm] : await guessTerms(env, item, country);
 
       if (country === 'jp') {
         const jpyRate = (await rate('JPY')) || FALLBACK_RATE.JPY;
-        return json({ ok: true, country: 'jp', terms, rate: jpyRate, currency: '¥' });
+        return json({ ok: true, country: 'jp', terms, rate: jpyRate, currency: '¥', resolved: fromUrl });
       }
 
       const candidates = await naverCandidates(env, terms);
       const krwRate = (await rate('KRW')) || FALLBACK_RATE.KRW;
-      return json({ ok: true, country: 'kr', terms, rate: krwRate, currency: '₩', candidates });
+      return json({ ok: true, country: 'kr', terms, rate: krwRate, currency: '₩', candidates, resolved: fromUrl });
     } catch (e) {
       return json({ ok: false, error: String(e.message || e) }, 502);
     }

@@ -51,7 +51,7 @@ async function fetchCandidates(item) {
       if (cands.length >= 10) break;
     }
   }
-  return { term, currency, candidates: cands };
+  return { term, currency, candidates: cands, resolved: data.resolved || '' };
 }
 
 const Perf = ({ style }) => <View style={[styles.perf, style]} />;
@@ -75,26 +75,40 @@ export default function App() {
   const addItem = () => {
     const name = input.trim();
     if (!name) return;
-    setItems(prev => [
-      { id: Date.now().toString(), name, country: 'jp', qty: 1, note: '', term: '', image: '', imageManual: false, purchased: false, price: null },
-      ...prev,
-    ]);
+    const it = { id: Date.now().toString(), name, country: 'jp', qty: 1, note: '', term: '', image: '', imageManual: false, purchased: false, price: null, candidates: null, currency: '¥' };
+    setItems(prev => [it, ...prev]);
     setInput('');
+    queryOne(it); // 加入時自動查價
   };
 
+  // 查價：自動選最吻合(第一個候選)，並存下候選清單供之後更換
   async function queryOne(item) {
     setBusy(b => ({ ...b, [item.id]: true }));
     try {
-      const { term, currency, candidates } = await fetchCandidates(item);
-      update(item.id, { term });
-      if (!candidates.length) update(item.id, { noResult: true });
-      else setPicker({ itemId: item.id, currency, candidates, name: item.name });
+      const { term, currency, candidates, resolved } = await fetchCandidates(item);
+      const patch = { term, currency, candidates };
+      if (resolved) patch.name = resolved; // 貼網址 → 改成解析出的商品名
+      if (!candidates.length) { patch.noResult = true; patch.price = null; }
+      else {
+        patch.noResult = false;
+        const c = candidates[0];
+        patch.price = { price: c.price, twd: c.twd, currency, title: c.title };
+        if (c.image && !item.imageManual) patch.image = c.image;
+      }
+      update(item.id, patch);
     } catch (e) {
       setBusy(b => ({ ...b, [item.id]: 'err' }));
       setTimeout(() => setBusy(b => ({ ...b, [item.id]: false })), 2500);
       return;
     }
     setBusy(b => ({ ...b, [item.id]: false }));
+  }
+
+  // 開啟候選清單以更換（用已存的候選，免重查）
+  function openPicker(item) {
+    if (item.candidates && item.candidates.length)
+      setPicker({ itemId: item.id, currency: item.currency, candidates: item.candidates, name: item.name });
+    else queryOne(item);
   }
 
   function choosePick(c) {
@@ -203,7 +217,7 @@ export default function App() {
                   {['jp', 'kr'].map(c => (
                     <TouchableOpacity key={c}
                       style={[styles.segBtn, it.country === c && styles.segBtnOn]}
-                      onPress={() => update(it.id, { country: c, term: '', price: null, noResult: false, image: it.imageManual ? it.image : '' })}
+                      onPress={() => { if (it.country === c) return; const u = { ...it, country: c, term: '', price: null, candidates: null, noResult: false, image: it.imageManual ? it.image : '' }; update(it.id, u); queryOne(u); }}
                     >
                       <Text style={[styles.segTxt, it.country === c && styles.segTxtOn]}>
                         {CURRENCY[c].flag} {CURRENCY[c].label}
@@ -224,35 +238,34 @@ export default function App() {
 
               <Perf style={styles.cardPerf} />
 
-              <View style={styles.rowBot}>
-                <View style={{ flex: 1 }}>
-                  {it.price ? (
-                    <>
-                      <Text style={styles.priceMain}>
-                        <Text style={styles.priceLocal}>{it.price.currency}{fmt(it.price.price)}</Text>
-                        <Text style={styles.twd}>　NT${fmt(it.price.twd)}</Text>
-                      </Text>
-                      <Text style={styles.pickedTitle} numberOfLines={1}>✓ {it.price.title}</Text>
-                    </>
-                  ) : state === 'err' ? (
-                    <Text style={styles.errTxt}>連線出錯，再按一次查價</Text>
-                  ) : it.noResult ? (
-                    <Text style={styles.errTxt}>查無結果，改上面搜尋字再查</Text>
-                  ) : (
-                    <Text style={styles.noPrice}>還沒查價</Text>
-                  )}
+              {state === true ? (
+                <View style={styles.rowBot}>
+                  <ActivityIndicator size="small" color={C.rose} />
+                  <Text style={styles.loadingTxt}>查價中…</Text>
                 </View>
-                <TouchableOpacity
-                  style={[styles.queryBtn, state === true && styles.queryBtnBusy]}
-                  disabled={state === true}
-                  onPress={() => queryOne(it)}
-                  activeOpacity={0.85}
-                >
-                  {state === true
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={styles.queryBtnTxt}>{it.price ? '重選' : '查價'}</Text>}
-                </TouchableOpacity>
-              </View>
+              ) : it.price ? (
+                <View style={styles.rowBot}>
+                  <TouchableOpacity style={{ flex: 1 }} onPress={() => openPicker(it)} activeOpacity={0.7}>
+                    <Text style={styles.priceMain}>
+                      <Text style={styles.priceLocal}>{it.price.currency}{fmt(it.price.price)}</Text>
+                      <Text style={styles.twd}>　NT${fmt(it.price.twd)}</Text>
+                    </Text>
+                    <Text style={styles.pickedTitle} numberOfLines={1}>✓ {it.price.title}　<Text style={styles.changeHint}>▾ 換一個</Text></Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.reBtn} onPress={() => queryOne(it)} activeOpacity={0.7}>
+                    <Text style={styles.reBtnTxt}>↻</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.rowBot}>
+                  <Text style={[styles.flex1, state === 'err' ? styles.errTxt : it.noResult ? styles.errTxt : styles.noPrice]}>
+                    {state === 'err' ? '連線出錯，再試一次' : it.noResult ? '查無結果，改搜尋字再查' : '還沒查價'}
+                  </Text>
+                  <TouchableOpacity style={styles.queryBtn} onPress={() => queryOne(it)} activeOpacity={0.85}>
+                    <Text style={styles.queryBtnTxt}>查價</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           );
         })}
@@ -389,8 +402,12 @@ const styles = StyleSheet.create({
   noPrice: { color: '#c1b7ae', fontSize: 14 },
   errTxt: { color: C.rose, fontSize: 13, fontWeight: '600' },
   queryBtn: { backgroundColor: C.rose, borderRadius: 11, paddingHorizontal: 20, paddingVertical: 10, minWidth: 72, alignItems: 'center' },
-  queryBtnBusy: { opacity: 0.75 },
   queryBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 2 },
+  loadingTxt: { color: C.muted, fontSize: 14, marginLeft: 9, fontWeight: '600' },
+  changeHint: { color: C.rose, fontSize: 11, fontWeight: '700' },
+  reBtn: { width: 40, height: 40, borderRadius: 11, backgroundColor: C.paper, borderWidth: 1.5, borderColor: C.line, alignItems: 'center', justifyContent: 'center' },
+  reBtnTxt: { color: C.inkSoft, fontSize: 18, fontWeight: '800' },
+  flex1: { flex: 1 },
 
   footer: { paddingHorizontal: 22, paddingTop: 4, paddingBottom: 16, backgroundColor: C.paper },
   footRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
