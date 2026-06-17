@@ -231,26 +231,32 @@ export default {
         const body = await request.json();
         const b64 = (body.image || '').replace(/^data:image\/\w+;base64,/, '');
         const visionModel = body.model || 'gpt-4.1-nano'; // 可由前端/測試指定模型，預設 gpt-4.1-nano（實測最準＋最便宜）
-        let name = '', info = '', usage = '', claim = '';
-        // OpenAI 視覺辨識，回 JSON {name, info, usage, claim}。分層：客觀辨識 vs 行銷宣稱；prompt 加防幻覺規則
+        let name = '', info = '', usage = '', claim = '', oaAnswered = false;
+        // OpenAI 視覺辨識，回 JSON {name, info, usage, claim, confidence}。寧可認不出也不亂猜
         const oa = await openaiChat(env, [
-          { type: 'text', text: '這是台灣遊客想買的商品照片。請「只根據包裝上實際看得到的文字、logo、圖案」辨識，不要憑空推測。只回 JSON：{"name":"品牌+品名，簡潔好搜尋(例：numbuzin 無濾鏡提亮防曬精華)。務必把包裝上的品牌讀出來；不要把 SPF、容量、色號、規格塞進來(那些放 claim)，讀不到品牌才只寫品名(繁體中文或當地語言皆可)","info":"客觀說明這是什麼類型的產品與主要用途，一句話，不要誇大效果，也不要提及品牌的國籍或產地(繁體中文約40字)","usage":"使用方式；若是食品就寫口味或食用方式(繁體中文約40字；無法判斷給空字串)","claim":"主打效果與產品特色：先用「・」列出包裝主打的具體效果或賣點(例 SPF50+、保濕提亮、特定成分訴求)，再用一兩句補充產品特色(質地、設計、適用膚質或對象、成分亮點、使用情境等)，約80~100字(繁體中文；無法判斷給空字串)"}。格式要求：每個欄位只填「內容本身」，不要在值裡重複欄位名稱或加上「這是什麼」「怎麼用」「主打效果」之類前綴或冒號。重要規則：產地、國籍、價格、醫療療效、具體成分含量等「無法從圖片確認」的資訊一律不要編造，寧可省略。若完全無法辨識，name 回 UNKNOWN。不要多餘文字、不要 markdown。' },
+          { type: 'text', text: '這是台灣遊客想買的商品照片。請只根據「包裝上實際看得到的文字、logo、圖案」辨識，不要憑空推測。\n辨識門檻(很重要)：只有能清楚讀出「具體商品名稱」時才辨識；以下情況一律回 name=UNKNOWN、不要猜——照片模糊或文字看不清、只看到品牌或製造商卻看不到產品名、只讀到通用類別字樣(如「第2類医薬品」「医薬品」「化粧品」這種法規分類不是商品名)。嚴禁從製造商或類別反推產品(看到「大正製薬」不可自己猜成感冒藥)。\n只回 JSON：{"name":"品牌+品名，簡潔好搜尋(例：numbuzin 無濾鏡提亮防曬精華)；規格(SPF/容量/色號)放 claim 不放 name；讀不到具體商品名就回 UNKNOWN","info":"客觀說明這是什麼類型的產品與主要用途，一句話，不要誇大效果，也不要提及品牌國籍或產地(約40字)","usage":"使用方式；食品就寫口味或食用方式(約40字；無法判斷給空字串)","claim":"主打效果與產品特色：先用「・」列出包裝主打的具體效果(例 SPF50+、保濕提亮)，再用一兩句補充產品特色(質地、適用對象、設計、情境)，約80~100字(無法判斷給空字串)","confidence":"high 或 low：你對 name 是否為正確且具體商品名稱的把握度，只要有任何不確定就回 low"}。格式：各欄位只填內容本身，不要把欄位名稱或冒號寫進值裡。鐵則：產地、國籍、價格、療效、症狀、適應症、成分含量等「包裝上看不到或無法確認」的資訊一律不要編造，看不到就留空字串。繁體中文。不要多餘文字、不要 markdown。' },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } },
         ], 550, visionModel);
         if (oa) {
           try {
             const m = oa.match(/\{[\s\S]*\}/);
             const obj = m ? JSON.parse(m[0]) : {};
+            oaAnswered = true; // OpenAI 有正常回應(不論認不認得出)→ 不再退 llava 亂猜
             const n = (obj.name || '').trim().slice(0, 60);
-            if (n && !/UNKNOWN|無法|抱歉|sorry|cannot|can't|unable/i.test(n)) {
+            const conf = String(obj.confidence || '').toLowerCase();
+            const unreadable = /UNKNOWN|無法|抱歉|sorry|cannot|can't|unable/i.test(n);
+            // name 仍夾帶「第X類/医薬品/化粧品」這種法規類別 = 沒讀到真正品名 → 視為認不出
+            const categoryLeak = /医薬品|醫藥品|医薬部外品|医療機器|第[0-9０-９]+\s*類|化粧品(?!水)/.test(n) || n.replace(/\s/g, '').length <= 2;
+            if (n && !unreadable && !categoryLeak && conf !== 'low') {
               name = n;
               info = (obj.info || '').trim().slice(0, 100);
               usage = (obj.usage || '').trim().slice(0, 100);
               claim = (obj.claim || '').trim().slice(0, 200);
             }
+            // 否則 name 留空白 = 認不出，前端會請使用者重拍或改文字輸入
           } catch {}
         }
-        if (!name) {
+        if (!name && !oaAnswered) {
           const bin = atob(b64);
           const bytes = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);

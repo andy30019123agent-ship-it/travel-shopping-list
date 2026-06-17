@@ -369,7 +369,7 @@ export default function App() {
       setScanning(false);
       // AI 辨識→跳「識物卡」：顯示商品名(可改)＋產品簡介，再決定加入比價
       if (d.ok && d.name) setScanResult({ uri: a.uri, name: d.name, info: d.info || '', usage: d.usage || '', claim: d.claim || '' });
-      else alert('認不出商品，可改用文字輸入或換個角度再拍一次');
+      else alert('這張不太確定是什麼 🤔\n建議正面對準包裝上的商品名稱、拍清楚一點再試，或直接用文字輸入商品名。');
     } catch (e) { setScanning(false); }
   }
   // 識物卡→加入清單並查價比價（查完跳圖片牆挑）
