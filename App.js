@@ -62,6 +62,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState({});
   const [picker, setPicker] = useState(null);
+  const [zoom, setZoom] = useState(null); // { url, itemId? }
 
   useEffect(() => {
     AsyncStorage.getItem(STORE_KEY).then(raw => { if (raw) setItems(JSON.parse(raw)); setLoaded(true); });
@@ -165,7 +166,7 @@ export default function App() {
                 >
                   <Text style={styles.checkTxt}>{it.purchased ? '✓' : ''}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.thumbWrap} onPress={() => pickImage(it.id)}>
+                <TouchableOpacity style={styles.thumbWrap} onPress={() => it.image ? setZoom({ url: it.image, itemId: it.id }) : pickImage(it.id)}>
                   {it.image
                     ? <Image source={{ uri: it.image }} style={styles.thumb} />
                     : <Text style={styles.thumbPlus}>＋圖</Text>}
@@ -288,7 +289,9 @@ export default function App() {
               {picker?.candidates.map((c, i) => (
                 <TouchableOpacity key={i} style={styles.cand} onPress={() => choosePick(c)} activeOpacity={0.7}>
                   {c.image
-                    ? <Image source={{ uri: c.image }} style={styles.candImg} />
+                    ? <TouchableOpacity onPress={() => setZoom({ url: c.image })} activeOpacity={0.8}>
+                        <Image source={{ uri: c.image }} style={styles.candImg} />
+                      </TouchableOpacity>
                     : <View style={styles.candImg} />}
                   <View style={{ flex: 1 }}>
                     <Text style={styles.candTitle} numberOfLines={2}>{c.title}</Text>
@@ -302,6 +305,23 @@ export default function App() {
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* 圖片放大燈箱 */}
+      <Modal visible={!!zoom} transparent animationType="fade" onRequestClose={() => setZoom(null)}>
+        <TouchableOpacity style={styles.zoomBackdrop} activeOpacity={1} onPress={() => setZoom(null)}>
+          {zoom?.url ? <Image source={{ uri: zoom.url }} style={styles.zoomImg} resizeMode="contain" /> : null}
+          <View style={styles.zoomBar}>
+            {zoom?.itemId ? (
+              <TouchableOpacity style={styles.zoomReplace} onPress={() => { const id = zoom.itemId; setZoom(null); pickImage(id); }}>
+                <Text style={styles.zoomReplaceTxt}>換成自己的圖</Text>
+              </TouchableOpacity>
+            ) : <View />}
+            <TouchableOpacity style={styles.zoomClose} onPress={() => setZoom(null)}>
+              <Text style={styles.zoomCloseTxt}>關閉 ✕</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
@@ -391,4 +411,13 @@ const styles = StyleSheet.create({
   candPrice: { color: C.inkSoft, fontSize: 14, fontWeight: '700', marginTop: 4, fontFamily: MONO },
   candTwd: { color: C.rose, fontSize: 14, fontWeight: '800', fontFamily: MONO },
   candPick: { color: C.rose, fontWeight: '800', fontSize: 13, letterSpacing: 1, borderWidth: 1.5, borderColor: C.rose, borderRadius: 8, paddingHorizontal: 11, paddingVertical: 6 },
+
+  zoomBackdrop: { flex: 1, backgroundColor: 'rgba(20,16,14,0.94)', alignItems: 'center', justifyContent: 'center', padding: 16 },
+  zoomImg: { width: '100%', height: '78%' },
+  zoomBar: { position: 'absolute', bottom: 36, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  zoomReplace: { borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.6)', borderRadius: 11, paddingHorizontal: 16, paddingVertical: 10 },
+  zoomReplaceTxt: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  zoomClose: { backgroundColor: C.rose, borderRadius: 11, paddingHorizontal: 18, paddingVertical: 10 },
+  zoomCloseTxt: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 1 },
 });
+

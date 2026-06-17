@@ -18,17 +18,77 @@ function json(obj, status = 200) {
   });
 }
 
+// 常見台灣客藥妝／伴手禮對照表（綽號/漢字品牌 → 當地搜尋字）
+const JP_DICT = {
+  '合利他命': 'アリナミンEX', '合力他命': 'アリナミンEX',
+  '表飛鳴': '新ビオフェルミンS', '新表飛鳴': '新ビオフェルミンS', '欣表飛鳴': '新ビオフェルミンS',
+  '撒隆巴斯': 'サロンパス', '小護士': 'メンソレータム', '面速力達母': 'メンソレータム', '曼秀雷敦': 'メンソレータム',
+  '蓋舒泰': 'ガスター10', '龍角散': '龍角散', '休足時間': '休足時間',
+  '命之母': '命の母', '命的母': '命の母', '太田胃散': '太田胃散',
+  '百保能': 'パブロン', '大正感冒藥': 'パブロン',
+  '止痛藥': 'イブA錠', '安美露': 'アンメルツヨコヨコ', '安膜露': 'アンメルツヨコヨコ',
+  '蒸氣眼罩': 'めぐりズム 蒸気でホットアイマスク', '美舒律': 'めぐりズム',
+  '小花眼藥水': 'ロートリセ', '樂敦眼藥水': 'ロート Vロート',
+  '娥羅納英': 'オロナインH軟膏', '正露丸': '正露丸', '口內炎貼片': '口内炎パッチ大正',
+  '白色戀人': '白い恋人', '東京香蕉': '東京ばな奈', '東京芭娜娜': '東京ばな奈',
+  '薯條三兄弟': 'じゃがポックル', '皇家奶茶': 'ロイヤルミルクティー', '一蘭拉麵': '一蘭 ラーメン',
+  '魔法瓶': 'サーモス', '保溫瓶': 'サーモス', '雪肌精': '雪肌精', '極潤': '肌研 極潤',
+  '牛乳石鹼': '牛乳石鹸', '碧柔': 'ビオレ', '洗顏專科': '専科 洗顔',
+  '液體絆創膏': '液体絆創膏', '液體OK繃': '液体絆創膏',
+};
+const KR_DICT = {
+  '雪花秀': '설화수', '后': '더 후 Whoo', '愛茉莉': '아모레퍼시픽', '正官庄': '정관장',
+  '蘭芝': '라네즈', '蜂蜜唇膜': '라네즈 립 슬리핑 마스크', '悅詩風吟': '이니스프리',
+  '菲詩小舖': '더페이스샵', '香蕉牛奶': '바나나맛 우유', '辛拉麵': '신라면',
+  '蜂蜜奶油杏仁': '허니버터아몬드', '紅蔘': '홍삼',
+};
+
+function normalize(s) { return (s || '').replace(/\s+/g, '').trim(); }
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[m][n];
+}
+// 容錯查表：完全相符 → 子字串包含 → 編輯距離(錯字)
+function dictLookup(dict, input) {
+  const q = normalize(input);
+  if (!q) return null;
+  if (dict[q]) return dict[q];
+  let best = null, bestScore = Infinity;
+  for (const key of Object.keys(dict)) {
+    const k = normalize(key);
+    if (k.length >= 2 && (q.includes(k) || k.includes(q))) {
+      const s = Math.abs(q.length - k.length);
+      if (s < bestScore) { bestScore = s; best = dict[key]; }
+      continue;
+    }
+    if (Math.abs(q.length - k.length) <= 1 && k.length >= 2) {
+      const d = lev(q, k);
+      const thr = q.length <= 4 ? 1 : 2;
+      if (d <= thr && d < bestScore) { bestScore = d; best = dict[key]; }
+    }
+  }
+  return best;
+}
+
 // AI：把中文商品名翻成當地語言的搜尋關鍵字（候選來自搜尋結果，不必多個關鍵字）
 async function guessTerms(env, item, country) {
+  // 先查對照表（含容錯），命中就不必呼叫 AI
+  const hit = dictLookup(country === 'kr' ? KR_DICT : JP_DICT, item);
+  if (hit) return [hit];
   const lang = country === 'kr' ? 'Korean' : 'Japanese';
   const hint = country === 'kr'
     ? 'Use the official Korean brand/product name with correct Hangul.'
     : 'Use the official Japanese brand/product name with correct Kanji/Katakana (NOT all-hiragana).';
   const prompt =
     `A Taiwanese tourist wants to buy "${item}" in ${country === 'kr' ? 'Korea' : 'Japan'}. ` +
-    `The input may be a formal name, a brand, OR a Taiwanese nickname / slang term for the product ` +
-    `(e.g. "小護士"=メンソレータム, "魔法瓶"=サーモス, 韓國"后"=Whoo). ` +
-    `First figure out which actual product it refers to, then give the single best ${lang} search keyword ` +
+    `The input may be a formal name, a brand, a Taiwanese nickname/slang, a Taiwanese transliteration of a ` +
+    `Japanese/Korean drugstore brand, OR contain typos (e.g. "小護士"=メンソレータム, "魔法瓶"=サーモス, ` +
+    `"合利他命"=アリナミン, "表飛鳴"=新ビオフェルミン, 韓國"后"=Whoo). ` +
+    `Correct obvious typos, then figure out which actual product it refers to, then give the single best ${lang} search keyword ` +
     `used on ${lang} shopping sites to find that product. ` +
     `${hint} Use the real local brand/product name, not a literal character-by-character translation. ` +
     `Reply with ONLY the keyword — no quotes, no romaji, no explanation.\n\nProduct: ${item}`;
