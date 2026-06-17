@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaView, View, Text, TextInput, TouchableOpacity, Image, Modal,
-  ScrollView, StyleSheet, StatusBar, Platform, ActivityIndicator, Animated,
+  ScrollView, StyleSheet, StatusBar, Platform, ActivityIndicator, Animated, Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -19,6 +19,24 @@ const CO = {
   jp: { flag: '🇯🇵', label: '日本', cur: '¥', curLabel: '日圓' },
   kr: { flag: '🇰🇷', label: '韓國', cur: '₩', curLabel: '韓元' },
 };
+// 精品/知名品牌官網（jp / kr），辨識到就附官網連結供你看官方定價
+const BRAND_SITES = [
+  { k: ['chanel', '香奈兒', '香奈尔'], jp: 'https://www.chanel.com/jp/', kr: 'https://www.chanel.com/kr/' },
+  { k: ['louis vuitton', 'lv', '路易威登'], jp: 'https://jp.louisvuitton.com/', kr: 'https://kr.louisvuitton.com/' },
+  { k: ['gucci', '古馳'], jp: 'https://www.gucci.com/jp/', kr: 'https://www.gucci.com/kr/' },
+  { k: ['dior', '迪奧'], jp: 'https://www.dior.com/ja_jp', kr: 'https://www.dior.com/ko_kr' },
+  { k: ['hermes', 'hermès', '愛馬仕'], jp: 'https://www.hermes.com/jp/ja/', kr: 'https://www.hermes.com/kr/ko/' },
+  { k: ['ysl', 'saint laurent', '聖羅蘭'], jp: 'https://www.ysl.com/ja-jp', kr: 'https://www.ysl.com/ko-kr' },
+  { k: ['prada', '普拉達'], jp: 'https://www.prada.com/jp/ja.html', kr: 'https://www.prada.com/kr/ko.html' },
+  { k: ['sk-ii', 'sk2', 'skii'], jp: 'https://www.sk-ii.jp/', kr: 'https://www.sk-ii.co.kr/' },
+  { k: ['雅詩蘭黛', 'estee lauder', 'estée'], jp: 'https://www.esteelauder.jp/', kr: 'https://www.esteelauder.co.kr/' },
+];
+function brandSite(name, country) {
+  const q = (name || '').toLowerCase();
+  for (const b of BRAND_SITES) if (b.k.some(x => q.includes(x))) return b[country];
+  return '';
+}
+const openUrl = u => { if (u) Linking.openURL(u).catch(() => {}); };
 const fmt = n => (n == null ? '' : Math.round(n).toLocaleString('en-US'));
 const enc = encodeURIComponent;
 const MONO = Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monospace', ios: 'Menlo', android: 'monospace', default: 'monospace' });
@@ -40,7 +58,7 @@ async function rakutenSearch(term) {
   for (const x of (rj.Items || [])) {
     const i = x.Item || x;
     if (!i.itemName || !i.itemPrice) continue;
-    out.push({ title: i.itemName, price: i.itemPrice, image: i.mediumImageUrls?.[0]?.imageUrl || i.smallImageUrls?.[0]?.imageUrl || '' });
+    out.push({ title: i.itemName, price: i.itemPrice, image: i.mediumImageUrls?.[0]?.imageUrl || i.smallImageUrls?.[0]?.imageUrl || '', url: i.itemUrl || '' });
   }
   return out;
 }
@@ -56,7 +74,7 @@ async function rakutenProductSearch(term) {
     const p = x.Product || x;
     const price = p.averagePrice || p.minPrice;
     if (!p.productName || !price) continue;
-    out.push({ title: p.productName, price: Math.round(price), priceMin: p.minPrice, priceMax: p.maxPrice, image: p.mediumImageUrl || p.smallImageUrl || '' });
+    out.push({ title: p.productName, price: Math.round(price), priceMin: p.minPrice, priceMax: p.maxPrice, image: p.mediumImageUrl || p.smallImageUrl || '', url: p.productUrlPC || '' });
   }
   return out;
 }
@@ -71,7 +89,7 @@ async function fetchCandidates(item) {
   const rate = data.rate || (item.country === 'kr' ? 0.021 : 0.197);
   let cands;
   if (item.country === 'kr') {
-    cands = (data.candidates || []).map(c => ({ title: c.title, price: c.price, image: c.image }));
+    cands = (data.candidates || []).map(c => ({ title: c.title, price: c.price, image: c.image, url: c.url || '' }));
   } else {
     // 日本：先用「商品價格導航」(比價型) 查，原文→翻譯詞；不足再退回市場商品搜尋
     let raw = data.raw || item.name;
@@ -86,7 +104,7 @@ async function fetchCandidates(item) {
     cands = cands.slice(0, 10);
   }
   cands = cands.map(c => ({ ...c, twd: Math.round(c.price * rate) }));
-  return { term, currency, candidates: cands, resolved: data.resolved || '' };
+  return { term, currency, candidates: cands, resolved: data.resolved || '', resolvedImage: data.resolvedImage || '', resolvedPrice: data.resolvedPrice || 0, rate };
 }
 
 function AnimatedCard({ children, style }) {
@@ -115,6 +133,7 @@ export default function App() {
   const [storeEdit, setStoreEdit] = useState(null); // 正在編輯店家的 item id
   const [budget, setBudget] = useState(0); // 整趟預算(台幣)
   const [budgetEdit, setBudgetEdit] = useState(null);
+  const [priceEdit, setPriceEdit] = useState(null); // 自填價格 {id, val, currency}
   const [scanning, setScanning] = useState(false);
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
   useFonts(Ionicons.font);
@@ -144,14 +163,18 @@ export default function App() {
   async function queryOne(item) {
     setBusy(b => ({ ...b, [item.id]: true }));
     try {
-      const { term, currency, candidates } = await fetchCandidates(item);
+      const { term, currency, candidates, resolvedImage, resolvedPrice, rate } = await fetchCandidates(item);
       const patch = { term, currency, candidates };
-      if (!candidates.length) { patch.noResult = true; patch.price = null; }
+      if (resolvedImage && !item.imageManual) patch.image = resolvedImage; // 貼當地頁→直接用該頁照片
+      if (resolvedPrice > 0) { // 貼當地頁有價→直接用
+        patch.noResult = false;
+        patch.price = { price: resolvedPrice, twd: Math.round(resolvedPrice * rate), currency, title: item.name };
+      } else if (!candidates.length) { patch.noResult = true; patch.price = null; }
       else {
         patch.noResult = false;
         const c = candidates[0];
-        patch.price = { price: c.price, twd: c.twd, currency, title: c.title };
-        if (c.image && !item.imageManual) patch.image = c.image;
+        patch.price = { price: c.price, twd: c.twd, currency, title: c.title, url: c.url };
+        if (c.image && !item.imageManual && !resolvedImage) patch.image = c.image;
       }
       update(item.id, patch);
     } catch (e) {
@@ -169,7 +192,7 @@ export default function App() {
   }
   function choosePick(c) {
     const { itemId, currency } = picker;
-    setItems(prev => prev.map(it => it.id === itemId ? { ...it, price: { price: c.price, twd: c.twd, currency, title: c.title }, image: it.imageManual ? it.image : (c.image || it.image), noResult: false } : it));
+    setItems(prev => prev.map(it => it.id === itemId ? { ...it, price: { price: c.price, twd: c.twd, currency, title: c.title, url: c.url }, image: it.imageManual ? it.image : (c.image || it.image), noResult: false } : it));
     setPicker(null);
   }
   async function repickWithTerm() {
@@ -268,17 +291,25 @@ export default function App() {
         {state === true ? (
           <View style={styles.priceRow}><ActivityIndicator size="small" color={C.rose} /><Text style={styles.loadingTxt}>查價中…</Text></View>
         ) : it.price ? (
+          <>
           <View style={styles.priceRow}>
-            <PriceTag twd={it.price.twd * it.qty} />
+            <TouchableOpacity onPress={() => setPriceEdit({ id: it.id, val: String(it.price.price), currency: it.price.currency })} activeOpacity={0.7} accessibilityLabel="編輯價格"><PriceTag twd={it.price.twd * it.qty} /></TouchableOpacity>
             <View style={styles.priceMid}>
               <Text style={styles.localPrice}>{it.price.currency}{fmt(it.price.price)}{it.qty > 1 ? ` ×${it.qty}` : ''}</Text>
               <Text style={styles.pickedTitle} numberOfLines={1}>{it.price.title}</Text>
             </View>
             <TouchableOpacity style={styles.changeBtn} onPress={() => openPicker(it)} activeOpacity={0.8}><Ionicons name="swap-horizontal" size={14} color={C.roseDeep} /><Text style={styles.changeBtnTxt}>換</Text></TouchableOpacity>
           </View>
+          <View style={styles.linkRow}>
+            <TouchableOpacity onPress={() => setPriceEdit({ id: it.id, val: String(it.price.price), currency: it.price.currency })}><Text style={styles.linkTxt}>✏️ 自填價格</Text></TouchableOpacity>
+            {it.price.url ? <TouchableOpacity onPress={() => openUrl(it.price.url)}><Text style={styles.linkTxt}>🔗 來源頁</Text></TouchableOpacity> : null}
+            {brandSite(it.name, it.country) ? <TouchableOpacity onPress={() => openUrl(brandSite(it.name, it.country))}><Text style={styles.linkTxt}>🏷️ 官網</Text></TouchableOpacity> : null}
+          </View>
+          </>
         ) : (
           <View style={styles.priceRow}>
             <Text style={[styles.flex1, state === 'err' || it.noResult ? styles.errTxt : styles.noPrice]}>{state === 'err' ? '連線出錯，再試一次' : it.noResult ? '查無結果，點換一個改關鍵字' : '尚未查價'}</Text>
+            <TouchableOpacity style={styles.changeBtn} onPress={() => setPriceEdit({ id: it.id, val: '', currency: CO[it.country].cur })} activeOpacity={0.8}><Text style={styles.changeBtnTxt}>自填</Text></TouchableOpacity>
             <TouchableOpacity style={styles.queryBtn} onPress={() => queryOne(it)} activeOpacity={0.85}><Ionicons name="search" size={15} color="#fff" /><Text style={styles.queryBtnTxt}>查價</Text></TouchableOpacity>
           </View>
         )}
@@ -477,6 +508,17 @@ export default function App() {
         </TouchableOpacity>
       </Modal>
 
+      {/* 自填價格 */}
+      <Modal visible={!!priceEdit} transparent animationType="fade" onRequestClose={() => setPriceEdit(null)}>
+        <TouchableOpacity style={styles.centerBackdrop} activeOpacity={1} onPress={() => setPriceEdit(null)}>
+          <View style={styles.storeModal} onStartShouldSetResponder={() => true}>
+            <Text style={styles.sheetTitle}>自己輸入價格（{priceEdit?.currency}）</Text>
+            <TextInput style={styles.storeInput} keyboardType="numeric" value={priceEdit?.val} placeholder="當地售價，例如 1280" placeholderTextColor="#cdbdb0" autoFocus onChangeText={t => setPriceEdit(s => ({ ...s, val: t.replace(/[^0-9.]/g, '') }))} />
+            <TouchableOpacity style={[styles.storeSave, { marginTop: 16 }]} onPress={() => { const v = parseFloat(priceEdit.val) || 0; const id = priceEdit.id; setItems(prev => prev.map(it => it.id === id ? { ...it, noResult: false, price: { price: v, twd: Math.round(v * rateOf(it.country)), currency: it.price?.currency || CO[it.country].cur, title: it.price?.title || it.name, url: it.price?.url } } : it)); setPriceEdit(null); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* 圖片放大 */}
       <Modal visible={!!zoom} transparent animationType="fade" onRequestClose={() => setZoom(null)}>
         <TouchableOpacity style={styles.zoomBackdrop} activeOpacity={1} onPress={() => setZoom(null)}>
@@ -589,6 +631,8 @@ const styles = StyleSheet.create({
   changeBtnTxt: { color: C.roseDeep, fontWeight: '800', fontSize: 13 },
   queryBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.rose, borderRadius: 11, paddingHorizontal: 18, paddingVertical: 10 },
   queryBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 1 },
+  linkRow: { flexDirection: 'row', gap: 16, marginTop: 9, paddingLeft: 2 },
+  linkTxt: { color: C.inkSoft, fontSize: 12, fontWeight: '700' },
   doneBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 11 },
   doneBtnTxt: { color: C.green, fontWeight: '800', fontSize: 13.5 },
 

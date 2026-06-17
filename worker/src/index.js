@@ -120,21 +120,25 @@ async function guessTerms(env, item, country) {
   }
 }
 
-// 貼網址 → 抓商品頁標題當搜尋來源
+// 貼網址 → 抓商品頁的標題／圖片／價格
+function metaContent(html, prop) {
+  const m = html.match(new RegExp(`<meta[^>]+(?:property|name|itemprop)=["']${prop}["'][^>]+content=["']([^"']+)`, 'i'))
+    || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name|itemprop)=["']${prop}["']`, 'i'));
+  return m ? m[1].replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim() : '';
+}
 async function extractFromUrl(url) {
   try {
     const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenshuiBot/1.0)' } });
-    if (!r.ok) return '';
+    if (!r.ok) return {};
     const html = await r.text();
-    let title = '';
-    const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)
-      || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
-    if (og) title = og[1];
-    else { const t = html.match(/<title[^>]*>([^<]+)/i); if (t) title = t[1]; }
-    title = title.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim();
-    title = title.split(/\s*[|｜\-–—]\s*/)[0].trim(); // 去掉站名後綴
-    return title;
-  } catch { return ''; }
+    let title = metaContent(html, 'og:title');
+    if (!title) { const t = html.match(/<title[^>]*>([^<]+)/i); if (t) title = t[1].replace(/&amp;/g, '&').trim(); }
+    title = title.split(/\s*[|｜\-–—]\s*/)[0].trim();
+    const image = metaContent(html, 'og:image');
+    const priceStr = metaContent(html, 'product:price:amount') || metaContent(html, 'og:price:amount') || metaContent(html, 'price');
+    const price = priceStr ? parseInt(priceStr.replace(/[^\d]/g, '')) : 0;
+    return { title, image, price };
+  } catch { return {}; }
 }
 
 async function rate(from) {
@@ -163,7 +167,7 @@ async function naverCandidates(env, terms) {
       const key = title.slice(0, 14);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ title, price, image: i.image || '', mall: i.mallName || '' });
+      out.push({ title, price, image: i.image || '', mall: i.mallName || '', url: i.link || '' });
       if (out.length >= 10) break;
     }
     if (out.length >= 10) break;
@@ -204,25 +208,25 @@ export default {
     if (!item && !givenTerm) return json({ ok: false, error: 'missing item' }, 400);
 
     try {
-      // 貼網址 → 先抓商品標題當搜尋字
-      let fromUrl = '';
+      // 貼網址 → 抓商品頁的標題/圖片/價格
+      let fromUrl = {};
       if (/^https?:\/\//i.test(item)) {
         fromUrl = await extractFromUrl(item);
-        if (fromUrl) item = fromUrl;
+        if (fromUrl.title) item = fromUrl.title;
       }
+      const urlExtra = { resolved: fromUrl.title || '', resolvedImage: fromUrl.image || '', resolvedPrice: fromUrl.price || 0 };
 
       if (country === 'jp') {
         const jpyRate = (await rate('JPY')) || FALLBACK_RATE.JPY;
-        // 智慧搜尋：先回原文，前端先用原文查樂天；不足再用翻譯詞。指定 term 則只回該詞。
         const translated = givenTerm ? givenTerm : (await guessTerms(env, item, country))[0];
-        return json({ ok: true, country: 'jp', raw: item, term: translated, terms: [translated], rate: jpyRate, currency: '¥', resolved: fromUrl });
+        return json({ ok: true, country: 'jp', raw: item, term: translated, terms: [translated], rate: jpyRate, currency: '¥', ...urlExtra });
       }
 
       // 韓國：worker 直接查。先原文搜，不足再翻譯搜。
       const krwRate = (await rate('KRW')) || FALLBACK_RATE.KRW;
       if (givenTerm) {
         const candidates = await naverCandidates(env, [givenTerm]);
-        return json({ ok: true, country: 'kr', raw: givenTerm, term: givenTerm, terms: [givenTerm], rate: krwRate, currency: '₩', candidates, resolved: fromUrl });
+        return json({ ok: true, country: 'kr', raw: givenTerm, term: givenTerm, terms: [givenTerm], rate: krwRate, currency: '₩', candidates, ...urlExtra });
       }
       let usedTerm = item;
       let candidates = await naverCandidates(env, [item]); // 原文先搜
@@ -235,7 +239,7 @@ export default {
           if (candidates.length) usedTerm = translated;
         }
       }
-      return json({ ok: true, country: 'kr', raw: item, term: usedTerm, terms: [usedTerm], rate: krwRate, currency: '₩', candidates, resolved: fromUrl });
+      return json({ ok: true, country: 'kr', raw: item, term: usedTerm, terms: [usedTerm], rate: krwRate, currency: '₩', candidates, ...urlExtra });
     } catch (e) {
       return json({ ok: false, error: String(e.message || e) }, 502);
     }
