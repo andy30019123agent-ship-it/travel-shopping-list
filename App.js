@@ -262,6 +262,7 @@ export default function App() {
   const [scanAsk, setScanAsk] = useState(null); // 低信心確認 {uri, name}
   const [aiTip, setAiTip] = useState(false); // 首次拍照提示彈窗
   const [aiTipSeen, setAiTipSeen] = useState(false); // 是否看過首次提示(存 settings)
+  const [guide, setGuide] = useState(false); // 使用說明彈窗
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
   useFonts(Ionicons.font);
 
@@ -572,6 +573,7 @@ export default function App() {
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity style={styles.scanBtn} onPress={() => aiTipSeen ? scanImage(true) : setAiTip(true)} activeOpacity={0.85} accessibilityLabel="AI 產品辨識"><Ionicons name="camera" size={18} color={C.roseDeep} /><Text style={styles.scanBtnTxt}>AI 產品辨識</Text></TouchableOpacity>
             <TouchableOpacity style={styles.calcBtn} onPress={() => setCalc({ cur: country, dir: 'toTWD', amt: '' })} activeOpacity={0.8} accessibilityLabel="匯率計算機"><Ionicons name="calculator-outline" size={20} color="#fff" /></TouchableOpacity>
+            <TouchableOpacity style={styles.calcBtn} onPress={() => setGuide(true)} activeOpacity={0.8} accessibilityLabel="使用說明"><Ionicons name="help-circle-outline" size={21} color="#fff" /></TouchableOpacity>
           </View>
         </View>
         <View style={styles.heroSeg}>
@@ -940,13 +942,46 @@ export default function App() {
           <View style={styles.onboardCard}>
             <Text style={styles.onboardEmoji}>🛍️</Text>
             <Text style={styles.onboardTitle}>歡迎用「免稅不是免費」</Text>
-            {[['add', '1. 加入想買的', '打商品名／綽號／貼網址，或按 📷 拍照'], ['search', '2. 查當地價', '按「查價」自動換算台幣、挑正確商品'], ['wallet', '3. 買到就記帳', '打「已買」移到記帳頁，依店家算免稅門檻']].map(([ic, t, d]) => (
+            {[['add', '1. 加入想買的', '打上商品名稱，或用右上「AI 產品辨識」拍照'], ['search', '2. 查當地價', '按「查價」自動換算台幣、挑正確商品'], ['wallet', '3. 買到就記帳', '打「買到了」移到記帳頁，依店家算免稅門檻']].map(([ic, t, d]) => (
               <View key={t} style={styles.onboardRow}>
                 <View style={styles.onboardIcon}><Ionicons name={ic} size={18} color={C.rose} /></View>
                 <View style={{ flex: 1 }}><Text style={styles.onboardRowT}>{t}</Text><Text style={styles.onboardRowD}>{d}</Text></View>
               </View>
             ))}
             <TouchableOpacity style={styles.onboardBtn} onPress={() => setOnboard(false)} activeOpacity={0.85}><Text style={styles.onboardBtnTxt}>開始使用</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 使用說明 */}
+      <Modal visible={guide} transparent animationType="fade" onRequestClose={() => setGuide(false)}>
+        <View style={styles.centerBackdrop}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setGuide(false)} />
+          <View style={styles.onboardCard}>
+            <View style={styles.guideHead}>
+              <Text style={styles.guideTitle}>使用說明</Text>
+              <TouchableOpacity onPress={() => setGuide(false)} hitSlop={10}><Ionicons name="close" size={24} color={C.muted} /></TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ alignSelf: 'stretch', maxHeight: 430 }}>
+              {[
+                ['add-circle-outline', '新增商品', '在搜尋列打上商品名稱，按「＋」或 Enter 加入清單。'],
+                ['camera-outline', 'AI 產品辨識', '點右上相機鈕拍商品照，自動辨識品名並查價；AI 沒把握時會請你確認，不會亂給。'],
+                ['search-outline', '查價・比價', '每筆按「查價」會列出當地多筆候選（圖＋當地價＋台幣），點「選」鎖定最吻合的。'],
+                ['swap-horizontal-outline', '更換・重搜', '價格旁的 ⇄ 可重開候選清單更換；找不到可改關鍵字重搜，或開官網看全部。'],
+                ['flag-outline', '切換國家', '頂部可切日本／韓國，每筆商品也能單獨切換國家。'],
+                ['create-outline', '自填價格', '沒查到也沒關係，點價格或「自填價格」手動輸入當地售價。'],
+                ['wallet-outline', '記帳', '買到的按「買到了」移到記帳頁，依店家分組並顯示免稅門檻進度。'],
+                ['cash-outline', '預算與結算', '在記帳頁設整趟預算，用綠／橘／紅進度條提醒；結束旅程可一鍵結算。'],
+                ['calculator-outline', '匯率計算機', '右上計算機可快速換算當地幣與台幣。'],
+              ].map(([ic, t, d]) => (
+                <View key={t} style={styles.onboardRow}>
+                  <View style={styles.onboardIcon}><Ionicons name={ic} size={18} color={C.rose} /></View>
+                  <View style={{ flex: 1 }}><Text style={styles.onboardRowT}>{t}</Text><Text style={styles.onboardRowD}>{d}</Text></View>
+                </View>
+              ))}
+              <Text style={styles.guideFoot}>免稅門檻（同店合計）：日本未稅 ¥5,000、韓國 ₩15,000 達標可退稅，金額僅供參考。價格與資訊由 AI 與公開資料提供，僅供參考、不作為購物建議。</Text>
+            </ScrollView>
+            <TouchableOpacity style={styles.onboardBtn} onPress={() => setGuide(false)} activeOpacity={0.85}><Text style={styles.onboardBtnTxt}>知道了</Text></TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1178,6 +1213,9 @@ const styles = StyleSheet.create({
   onboardRowT: { color: C.ink, fontSize: 14.5, fontWeight: '800' },
   onboardRowD: { color: C.muted, fontSize: 12.5, marginTop: 1 },
   onboardBtn: { backgroundColor: C.rose, borderRadius: 14, paddingVertical: 13, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
+  guideHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', alignSelf: 'stretch', marginBottom: 12 },
+  guideTitle: { fontSize: 20, fontWeight: '900', color: C.ink, letterSpacing: 0.5 },
+  guideFoot: { color: C.muted, fontSize: 11.5, lineHeight: 18, marginTop: 6, marginBottom: 2 },
   onboardBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 16, letterSpacing: 1 },
 
   endTripBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.rose, borderRadius: 14, paddingVertical: 14, marginTop: 4, marginBottom: 8 },
