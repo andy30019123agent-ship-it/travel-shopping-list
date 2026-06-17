@@ -26,7 +26,10 @@ async function guessTerms(env, item, country) {
     : 'Use the official Japanese brand/product name with correct Kanji/Katakana (NOT all-hiragana).';
   const prompt =
     `A Taiwanese tourist wants to buy "${item}" in ${country === 'kr' ? 'Korea' : 'Japan'}. ` +
-    `Give the single best ${lang} search keyword used on ${lang} shopping sites to find this exact product. ` +
+    `The input may be a formal name, a brand, OR a Taiwanese nickname / slang term for the product ` +
+    `(e.g. "小護士"=メンソレータム, "魔法瓶"=サーモス, 韓國"后"=Whoo). ` +
+    `First figure out which actual product it refers to, then give the single best ${lang} search keyword ` +
+    `used on ${lang} shopping sites to find that product. ` +
     `${hint} Use the real local brand/product name, not a literal character-by-character translation. ` +
     `Reply with ONLY the keyword — no quotes, no romaji, no explanation.\n\nProduct: ${item}`;
   try {
