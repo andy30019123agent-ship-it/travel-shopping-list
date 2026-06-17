@@ -811,11 +811,10 @@ export default function App() {
       </Modal>
 
       {/* 匯率計算機 */}
-      <Modal visible={!!calc} transparent animationType="slide" onRequestClose={() => setCalc(null)}>
-        <View style={styles.sheetBackdrop}>
+      <Modal visible={!!calc} transparent animationType="fade" onRequestClose={() => setCalc(null)}>
+        <View style={styles.centerBackdrop}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setCalc(null)} />
-          <View style={styles.sheet}>
-            <View style={styles.grip} />
+          <View style={styles.storeModal}>
             <View style={styles.sheetHead}><View><Text style={styles.sheetKicker}>匯率計算機</Text><Text style={styles.sheetTitle}>快速換算</Text></View><TouchableOpacity onPress={() => setCalc(null)} hitSlop={10}><Ionicons name="close" size={24} color={C.muted} /></TouchableOpacity></View>
             {calc && (
               <View style={{ paddingTop: 6 }}>
@@ -1064,7 +1063,8 @@ const styles = StyleSheet.create({
   noneBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, paddingVertical: 11 },
   noneTxt: { color: C.muted, fontWeight: '700', fontSize: 13 },
 
-  centerBackdrop: { flex: 1, backgroundColor: 'rgba(46,36,32,0.55)', alignItems: 'center', justifyContent: 'center', padding: 26 },
+  // 靠上對齊：iOS PWA 鍵盤升起不會推畫面，置中/靠底的輸入框會被鍵盤蓋住，改靠上方就不會被遮
+  centerBackdrop: { flex: 1, backgroundColor: 'rgba(46,36,32,0.55)', alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 26, paddingTop: 56 },
   storeModal: { backgroundColor: C.surface, borderRadius: 20, padding: 20, width: '100%' },
   storeInput: { backgroundColor: C.bg, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: C.ink, marginTop: 12, ...NO_OUTLINE },
   storeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
