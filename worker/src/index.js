@@ -101,13 +101,17 @@ function dictLookup(dict, input) {
 }
 
 // OpenAI Chat（文字或含圖片的 content），失敗回 null 讓呼叫端退回免費模型
-async function openaiChat(env, content, max_tokens = 50) {
+async function openaiChat(env, content, max_tokens = 50, model = 'gpt-4o-mini') {
   if (!env.OPENAI_API_KEY) return null;
   try {
+    const body = { model, messages: [{ role: 'user', content }] };
+    // gpt-5 系列是推理模型：用 max_completion_tokens(含思考額度)、temperature 只能預設、降低思考量省錢加速
+    if (/^gpt-5/.test(model)) { body.max_completion_tokens = Math.max(max_tokens, 1500); body.reasoning_effort = 'low'; }
+    else { body.max_tokens = max_tokens; body.temperature = 0; }
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content }], max_tokens, temperature: 0 }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) return null;
     const j = await r.json();
@@ -226,12 +230,13 @@ export default {
       try {
         const body = await request.json();
         const b64 = (body.image || '').replace(/^data:image\/\w+;base64,/, '');
+        const visionModel = body.model || 'gpt-4.1-nano'; // 可由前端/測試指定模型，預設 gpt-4.1-nano（實測最準＋最便宜）
         let name = '', info = '', usage = '';
-        // 先用 OpenAI gpt-4o-mini 視覺辨識（較準），回 JSON {name, info, usage}
+        // 先用 OpenAI 視覺辨識（較準），回 JSON {name, info, usage}。prompt 加防幻覺規則，降低文案亂掰
         const oa = await openaiChat(env, [
-          { type: 'text', text: '這是台灣遊客想買的商品照片。讀出包裝上的文字/logo 辨識商品，只回 JSON：{"name":"商品最常見的搜尋名稱(品牌+品名，繁體中文或當地語言皆可)","info":"產品介紹：這是什麼、品牌定位與特色賣點(繁體中文，約60字)","usage":"用法與使用效果：化妝品/保健品說明怎麼使用、能達到什麼效果；若是食品就寫口味或食用方式，不要列出成分表(繁體中文，約50字；無法判斷就給空字串)"}。若完全無法辨識，name 回 UNKNOWN。不要多餘文字、不要 markdown。' },
+          { type: 'text', text: '這是台灣遊客想買的商品照片。請「只根據包裝上實際看得到的文字、logo、圖案」辨識，不要憑空推測。只回 JSON：{"name":"商品最常見的搜尋名稱(品牌+品名，繁體中文或當地語言皆可)","info":"產品介紹：這是什麼類型的產品、主要用途或賣點(繁體中文，約60字)","usage":"用法與使用效果：化妝品/保健品說明怎麼使用、能帶來什麼效果；若是食品就寫口味或食用方式，不要列成分表(繁體中文，約50字；無法判斷就給空字串)"}。重要規則：產地、國籍、價格、醫療療效、具體成分含量等「無法從圖片確認」的資訊一律不要編造，寧可省略或寫保守一點；不確定品牌時 name 只寫看得到的品名即可。若完全無法辨識，name 回 UNKNOWN。不要多餘文字、不要 markdown。' },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } },
-        ], 380);
+        ], 380, visionModel);
         if (oa) {
           try {
             const m = oa.match(/\{[\s\S]*\}/);
