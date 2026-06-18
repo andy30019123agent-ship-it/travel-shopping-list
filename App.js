@@ -48,6 +48,7 @@ const NO_OUTLINE = Platform.OS === 'web' ? { outlineStyle: 'none', outlineWidth:
 // 購物點地圖深連結：依所選地圖（Google／Naver）開啟；有綁定地址就帶上更精準
 function spotMapUrl(name, country, spot) {
   if (typeof spot === 'string' && spot.trim()) return spot.trim(); // 舊版相容：直接貼的連結
+  if (spot && spot.url) return spot.url; // 使用者貼上的地圖連結：直接開那個確切地點
   const provider = (spot && spot.provider) || (country === 'kr' ? 'naver' : 'google');
   const n = (name || '').trim();
   const full = (spot && spot.address) ? `${n} ${spot.address}` : n;
@@ -353,7 +354,20 @@ export default function App() {
     let cancelled = false;
     setStoreEdit(s => s ? { ...s, searching: true } : s);
     const prov = storeEdit.provider || (storeEdit.country === 'kr' ? 'naver' : 'google');
+    // 偵測貼上的地圖連結 → 解析成確切地點直接綁定
+    const isUrl = /^https?:\/\//i.test(q) || /(maps\.app\.goo\.gl|goo\.gl\/maps|google\.[a-z.]+\/maps|naver\.me|map\.naver\.com)/i.test(q);
     const t = setTimeout(() => {
+      if (isUrl) {
+        const link = /^https?:\/\//i.test(q) ? q : 'https://' + q;
+        const linkProv = /naver/i.test(q) ? 'naver' : 'google';
+        fetch(`${WORKER_URL}/resolveplace?url=${encodeURIComponent(link)}`)
+          .then(r => r.json()).then(d => {
+            if (cancelled) return;
+            if (d.ok && d.place) { const pl = d.place; setStoreEdit(s => s ? { ...s, val: pl.name || s.val, provider: linkProv, place: { address: pl.address || '', lat: pl.lat, lon: pl.lon, url: pl.url }, results: [], searching: false } : s); }
+            else setStoreEdit(s => s ? { ...s, searching: false } : s);
+          }).catch(() => { if (!cancelled) setStoreEdit(s => s ? { ...s, searching: false } : s); });
+        return;
+      }
       fetch(`${WORKER_URL}/places?q=${encodeURIComponent(q)}&country=${storeEdit.country || 'jp'}&provider=${prov}`)
         .then(r => r.json()).then(d => { if (!cancelled) setStoreEdit(s => s ? { ...s, results: d.results || [], searching: false } : s); })
         .catch(() => { if (!cancelled) setStoreEdit(s => s ? { ...s, searching: false } : s); });
@@ -1076,6 +1090,7 @@ export default function App() {
               <TextInput style={styles.spotSearchInput} value={storeEdit?.val} placeholder={(storeEdit?.provider || (storeEdit?.country === 'kr' ? 'naver' : 'google')) === 'naver' ? '韓國店家，例如 올리브영 명동' : '店家名稱，例如 唐吉訶德 大阪'} placeholderTextColor="#cdbdb0" autoFocus autoCapitalize="none" onChangeText={t => setStoreEdit(s => ({ ...s, val: t, place: null }))} />
               {storeEdit?.searching ? <ActivityIndicator size="small" color={C.rose} /> : (storeEdit?.val ? <TouchableOpacity onPress={() => setStoreEdit(s => ({ ...s, val: '', place: null, results: [] }))} hitSlop={8} accessibilityLabel="清除"><Ionicons name="close-circle" size={17} color={C.muted} /></TouchableOpacity> : null)}
             </View>
+            {!storeEdit?.place ? <Text style={styles.spotPasteHint}>🔗 也可以直接貼上 Google／Naver 地圖連結</Text> : null}
 
             {storeEdit?.place ? (
               <View style={styles.spotBound}>
@@ -1472,6 +1487,7 @@ const styles = StyleSheet.create({
   spotResultStar: { color: C.gold, fontSize: 12.5, fontWeight: '800' },
   spotResultAddr: { color: C.muted, fontSize: 12, marginTop: 1 },
   spotEmpty: { color: C.muted, fontSize: 12.5, marginTop: 10, lineHeight: 18 },
+  spotPasteHint: { color: C.muted, fontSize: 11.5, marginTop: 7 },
   spotBound: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: C.roseSoft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, marginTop: 8 },
   spotBoundName: { color: C.roseDeep, fontSize: 14.5, fontWeight: '800' },
   spotBoundAddr: { color: C.inkSoft, fontSize: 12, marginTop: 1 },

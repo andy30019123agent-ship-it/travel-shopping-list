@@ -67,6 +67,27 @@ async function googlePlaces(env, q, country) {
     rating: p.rating || null,
   }));
 }
+// 購物點：把貼上的 Google／Naver 地圖短連結解析成 {名稱,地址,座標}
+async function resolvePlace(link) {
+  let cur = link; const chain = [link];
+  for (let i = 0; i < 6; i++) {
+    let r;
+    try { r = await fetch(cur, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' } }); }
+    catch { break; }
+    const loc = r.headers.get('location');
+    if (!loc) break;
+    try { cur = new URL(loc, cur).toString(); } catch { break; }
+    chain.push(cur);
+  }
+  for (const u of chain) {
+    let p; try { p = new URL(u); } catch { continue; }
+    const title = p.searchParams.get('title'); // Naver
+    if (title) return { name: title, address: '', lat: parseFloat(p.searchParams.get('lat')) || null, lon: parseFloat(p.searchParams.get('lng')) || null, url: link };
+    const q = p.searchParams.get('q'); // Google
+    if (q) { const name = (q.split(/\s+\d|,/)[0] || q).trim(); return { name: name || q, address: q, lat: null, lon: null, url: link }; }
+  }
+  return { name: '', address: '', lat: null, lon: null, url: link };
+}
 // 購物點：Naver 地區搜尋（用既有 Naver 金鑰，僅韓國）
 async function naverLocal(env, q) {
   const r = await fetch(`https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(q)}&display=6&sort=random`, {
@@ -517,6 +538,13 @@ export default {
         const results = provider === 'naver' ? await naverLocal(env, q) : await googlePlaces(env, q, country);
         return json({ ok: true, results });
       } catch (e) { return json({ ok: true, results: [], error: String(e).slice(0, 120) }); }
+    }
+    // 購物點：解析貼上的地圖短連結 → {名稱,地址,座標,url}
+    if (url.pathname === '/resolveplace') {
+      const link = (url.searchParams.get('url') || '').trim();
+      if (!/^https?:\/\//i.test(link)) return json({ ok: false });
+      try { return json({ ok: true, place: await resolvePlace(link) }); }
+      catch (e) { return json({ ok: false, error: String(e).slice(0, 120) }); }
     }
     // 候選清單標題快速翻成繁中（picker 用，一次翻一批）
     if (url.pathname === '/translate') {
