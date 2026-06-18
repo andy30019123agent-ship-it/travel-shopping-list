@@ -472,6 +472,24 @@ export default {
       const [jpy, krw] = await Promise.all([rate('JPY'), rate('KRW')]);
       return json({ ok: true, jpy: jpy || FALLBACK_RATE.JPY, krw: krw || FALLBACK_RATE.KRW });
     }
+    // 購物點地點搜尋：用免金鑰的 OpenStreetMap/Photon 找店家，回名稱+地址+座標
+    if (url.pathname === '/places') {
+      const q = (url.searchParams.get('q') || '').trim();
+      const country = url.searchParams.get('country') === 'kr' ? 'kr' : 'jp';
+      if (q.length < 2) return json({ ok: true, results: [] });
+      const cc = country === 'kr' ? 'KR' : 'JP';
+      try {
+        const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8`, { headers: { 'User-Agent': 'travel-shopping-list/1.0 (price compare app)' } });
+        const d = await r.json();
+        const out = (d.features || []).map(f => {
+          const p = f.properties || {}; const co = (f.geometry && f.geometry.coordinates) || [];
+          const addr = [p.street, p.district, p.city, p.state, p.country].filter(Boolean).join(', ');
+          return { name: p.name || p.street || q, address: addr, lat: co[1], lon: co[0], cc: p.countrycode || '' };
+        }).filter(x => x.name && x.lat != null);
+        const inCc = out.filter(x => x.cc === cc);
+        return json({ ok: true, results: (inCc.length ? inCc : out).slice(0, 6) });
+      } catch (e) { return json({ ok: true, results: [] }); }
+    }
     // 候選清單標題快速翻成繁中（picker 用，一次翻一批）
     if (url.pathname === '/translate') {
       if (request.method !== 'POST') return json({ ok: false }, 405);

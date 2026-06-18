@@ -45,14 +45,16 @@ const MONO = Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monosp
 // 移除 react-native-web 點擊輸入框時的瀏覽器預設藍色外框
 const NO_OUTLINE = Platform.OS === 'web' ? { outlineStyle: 'none', outlineWidth: 0 } : {};
 
-// 購物點地圖深連結：有貼專屬連結就直接用；否則用店名搜尋（韓國 Naver、日本 Google）
-function spotMapUrl(name, country, explicit) {
-  if (explicit && explicit.trim()) return explicit.trim();
-  const q = enc((name || '').trim());
-  if (!q) return '';
-  return country === 'kr'
-    ? `https://map.naver.com/p/search/${q}`
-    : `https://www.google.com/maps/search/?api=1&query=${q}`;
+// 購物點地圖深連結：依所選地圖（Google／Naver）開啟；有綁定地址就帶上更精準
+function spotMapUrl(name, country, spot) {
+  if (typeof spot === 'string' && spot.trim()) return spot.trim(); // 舊版相容：直接貼的連結
+  const provider = (spot && spot.provider) || (country === 'kr' ? 'naver' : 'google');
+  const n = (name || '').trim();
+  const full = (spot && spot.address) ? `${n} ${spot.address}` : n;
+  if (!full.trim()) return '';
+  return provider === 'naver'
+    ? `https://map.naver.com/p/search/${enc(n || full)}`
+    : `https://www.google.com/maps/search/?api=1&query=${enc(full)}`;
 }
 
 function dedupeBy(arr, keyFn) {
@@ -342,6 +344,21 @@ export default function App() {
         setPicker(p => p ? { ...p, trans: { ...(p.trans || {}), ...map }, translating: false } : p);
       }).catch(() => setPicker(p => p ? { ...p, translating: false } : p));
   }, [picker]);
+  // 購物點：輸入店名 debounce 後，向 worker 搜尋真實店家（Photon/OSM，免金鑰）
+  useEffect(() => {
+    if (!storeEdit) return;
+    if (storeEdit.place) return; // 已綁定地點就不再搜
+    const q = (storeEdit.val || '').trim();
+    if (q.length < 2) { setStoreEdit(s => (s && s.results && s.results.length ? { ...s, results: [], searching: false } : s)); return; }
+    let cancelled = false;
+    setStoreEdit(s => s ? { ...s, searching: true } : s);
+    const t = setTimeout(() => {
+      fetch(`${WORKER_URL}/places?q=${encodeURIComponent(q)}&country=${storeEdit.country || 'jp'}`)
+        .then(r => r.json()).then(d => { if (!cancelled) setStoreEdit(s => s ? { ...s, results: d.results || [], searching: false } : s); })
+        .catch(() => { if (!cancelled) setStoreEdit(s => s ? { ...s, searching: false } : s); });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [storeEdit?.val, storeEdit?.place]);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
   useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, spotLinks, budget, onboardSeen: !onboard, aiTipSeen })); }, [country, sort, stores, spotLinks, budget, onboard, aiTipSeen, settingsLoaded]);
 
@@ -349,6 +366,16 @@ export default function App() {
   const update = (id, patch) => setItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
   const remove = id => setItems(prev => prev.filter(it => it.id !== id));
   const rememberStore = name => { const n = name.trim(); if (n && !stores.includes(n)) setStores(prev => [n, ...prev].slice(0, 8)); };
+  // 開啟購物點設定：帶入既有店名/已綁定地點/地圖選擇
+  const openStoreEdit = (ids, name, ctry) => {
+    const sp = spotLinks[(name || '').trim()];
+    setStoreEdit({
+      ids, val: name || '', country: ctry,
+      provider: (sp && typeof sp === 'object' && sp.provider) || undefined,
+      place: (sp && typeof sp === 'object' && sp.lat != null) ? { address: sp.address, lat: sp.lat, lon: sp.lon } : null,
+      results: [],
+    });
+  };
 
   const addItem = (nameArg) => {
     const name = (nameArg ?? input).trim();
@@ -616,7 +643,7 @@ export default function App() {
         </View>
 
         <View style={styles.spotRow}>
-          <TouchableOpacity style={styles.spotRowMain} activeOpacity={0.7} onPress={() => setStoreEdit({ ids: [it.id], val: it.store || '', link: spotLinks[(it.store || '').trim()] || '', country: it.country })} accessibilityLabel="設定預計購物點">
+          <TouchableOpacity style={styles.spotRowMain} activeOpacity={0.7} onPress={() => openStoreEdit([it.id], it.store, it.country)} accessibilityLabel="設定預計購物點">
             <Ionicons name="location-outline" size={14} color={it.store ? C.roseDeep : C.muted} />
             <Text style={[styles.spotRowTxt, it.store && styles.spotRowTxtOn]} numberOfLines={1}>{it.store || '設定預計購物點'}</Text>
           </TouchableOpacity>
@@ -815,7 +842,7 @@ export default function App() {
           {ledger.map((g, gi) => (
             <View key={gi} style={styles.storeGroup}>
               <View style={styles.storeHead}>
-                <TouchableOpacity style={styles.storeNameBtn} onPress={() => setStoreEdit({ ids: g.items.map(i => i.id), val: g.store, link: spotLinks[(g.store || '').trim()] || '', country: g.country })} activeOpacity={0.7}>
+                <TouchableOpacity style={styles.storeNameBtn} onPress={() => openStoreEdit(g.items.map(i => i.id), g.store, g.country)} activeOpacity={0.7}>
                   <Ionicons name="storefront-outline" size={15} color={C.inkSoft} />
                   <Text style={styles.storeName}>{g.store || '未指定店家'}</Text>
                   <Ionicons name="create-outline" size={13} color={C.muted} />
@@ -1026,19 +1053,64 @@ export default function App() {
         <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setStoreEdit(null)} />
           <View style={styles.storeModal}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: 460 }}>
             <Text style={styles.sheetTitle}>預計在哪家買？</Text>
-            <TextInput style={styles.storeInput} value={storeEdit?.val} placeholder="店家名稱，例如 唐吉訶德 梅田店" placeholderTextColor="#cdbdb0" autoFocus onChangeText={t => setStoreEdit(s => ({ ...s, val: t }))} />
+            <View style={styles.spotSearchWrap}>
+              <Ionicons name="search" size={16} color={C.muted} />
+              <TextInput style={styles.spotSearchInput} value={storeEdit?.val} placeholder="搜尋店家，例如 olive young 明洞" placeholderTextColor="#cdbdb0" autoFocus autoCapitalize="none" onChangeText={t => setStoreEdit(s => ({ ...s, val: t, place: null }))} />
+              {storeEdit?.searching ? <ActivityIndicator size="small" color={C.rose} /> : (storeEdit?.val ? <TouchableOpacity onPress={() => setStoreEdit(s => ({ ...s, val: '', place: null, results: [] }))} hitSlop={8} accessibilityLabel="清除"><Ionicons name="close-circle" size={17} color={C.muted} /></TouchableOpacity> : null)}
+            </View>
+
+            {storeEdit?.place ? (
+              <View style={styles.spotBound}>
+                <Ionicons name="location" size={16} color={C.roseDeep} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.spotBoundName} numberOfLines={1}>{storeEdit.val}</Text>
+                  {storeEdit.place.address ? <Text style={styles.spotBoundAddr} numberOfLines={1}>{storeEdit.place.address}</Text> : null}
+                </View>
+                <View style={styles.spotBoundOk}><Ionicons name="checkmark" size={13} color="#fff" /></View>
+                <TouchableOpacity onPress={() => setStoreEdit(s => ({ ...s, place: null }))} hitSlop={8} accessibilityLabel="解除綁定"><Ionicons name="close" size={16} color={C.muted} /></TouchableOpacity>
+              </View>
+            ) : (storeEdit?.results && storeEdit.results.length) ? (
+              <View style={styles.spotResults}>
+                {storeEdit.results.map((r, i) => (
+                  <TouchableOpacity key={i} style={[styles.spotResult, i > 0 && styles.spotResultDiv]} activeOpacity={0.7} onPress={() => setStoreEdit(s => ({ ...s, val: r.name, place: { address: r.address, lat: r.lat, lon: r.lon }, results: [] }))}>
+                    <Ionicons name="location-outline" size={15} color={C.rose} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.spotResultName} numberOfLines={1}>{r.name}</Text>
+                      {r.address ? <Text style={styles.spotResultAddr} numberOfLines={1}>{r.address}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
+
             {stores.length > 0 && (
-              <View style={styles.storeChips}>{stores.map(s => <TouchableOpacity key={s} style={styles.storeChip} onPress={() => setStoreEdit(e => ({ ...e, val: s, link: spotLinks[s] || e.link }))}><Text style={styles.storeChipTxt}>{s}</Text></TouchableOpacity>)}</View>
+              <>
+                <Text style={styles.scanLabel}>已使用過的地點</Text>
+                <View style={styles.storeChips}>{stores.map(s => <TouchableOpacity key={s} style={styles.storeChip} onPress={() => { const sp = spotLinks[s]; setStoreEdit(e => ({ ...e, val: s, place: (sp && typeof sp === 'object' && sp.lat != null) ? { address: sp.address, lat: sp.lat, lon: sp.lon } : null, provider: (sp && sp.provider) || e.provider, results: [] })); }}><Text style={styles.storeChipTxt}>{s}</Text></TouchableOpacity>)}</View>
+              </>
             )}
-            <Text style={styles.scanLabel}>地圖連結（選填）</Text>
-            <TextInput style={styles.storeInput} value={storeEdit?.link} placeholder="貼上 Google／Naver 地圖連結" placeholderTextColor="#cdbdb0" autoCapitalize="none" onChangeText={t => setStoreEdit(s => ({ ...s, link: t }))} />
-            <Text style={styles.spotHint}>留空也行：到當地會用店名自動搜尋（{storeEdit?.country === 'kr' ? 'Naver' : 'Google'} 地圖）</Text>
-            <TouchableOpacity style={styles.storeSave} onPress={() => {
+
+            <Text style={styles.scanLabel}>導航地圖</Text>
+            <View style={styles.mapSeg}>
+              {[['google', 'Google 地圖'], ['naver', 'Naver 地圖']].map(([k, label]) => {
+                const on = (storeEdit?.provider || (storeEdit?.country === 'kr' ? 'naver' : 'google')) === k;
+                return (
+                  <TouchableOpacity key={k} style={[styles.mapSegBtn, on && styles.mapSegOn]} onPress={() => setStoreEdit(s => ({ ...s, provider: k }))} activeOpacity={0.85}>
+                    <Ionicons name="map-outline" size={14} color={on ? C.roseDeep : C.muted} />
+                    <Text style={[styles.mapSegTxt, on && styles.mapSegTxtOn]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            </ScrollView>
+
+            <TouchableOpacity style={[styles.storeSave, { marginTop: 14 }]} onPress={() => {
               const v = (storeEdit.val || '').trim();
-              const link = (storeEdit.link || '').trim();
+              const provider = storeEdit.provider || (storeEdit.country === 'kr' ? 'naver' : 'google');
               setItems(prev => prev.map(it => storeEdit.ids.includes(it.id) ? { ...it, store: v } : it));
-              if (v) { rememberStore(v); setSpotLinks(prev => { const n = { ...prev }; if (link) n[v] = link; else delete n[v]; return n; }); }
+              if (v) { rememberStore(v); setSpotLinks(prev => ({ ...prev, [v]: { provider, ...(storeEdit.place || {}) } })); }
               setStoreEdit(null);
             }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
           </View>
@@ -1386,7 +1458,22 @@ const styles = StyleSheet.create({
   spotGroupCount: { color: C.inkSoft, fontSize: 11.5, fontWeight: '800', backgroundColor: C.bg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
   spotGroupNav: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.rose, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
   spotGroupNavTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
-  spotHint: { color: C.muted, fontSize: 11.5, marginTop: 8, lineHeight: 16 },
+  spotSearchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.bg, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, marginTop: 12 },
+  spotSearchInput: { flex: 1, fontSize: 16, color: C.ink, ...NO_OUTLINE },
+  spotResults: { marginTop: 8, borderWidth: 1, borderColor: C.line, borderRadius: 12, overflow: 'hidden' },
+  spotResult: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 11, backgroundColor: C.surface },
+  spotResultDiv: { borderTopWidth: 1, borderTopColor: C.line },
+  spotResultName: { color: C.ink, fontSize: 14.5, fontWeight: '700' },
+  spotResultAddr: { color: C.muted, fontSize: 12, marginTop: 1 },
+  spotBound: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: C.roseSoft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, marginTop: 8 },
+  spotBoundName: { color: C.roseDeep, fontSize: 14.5, fontWeight: '800' },
+  spotBoundAddr: { color: C.inkSoft, fontSize: 12, marginTop: 1 },
+  spotBoundOk: { width: 20, height: 20, borderRadius: 10, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center' },
+  mapSeg: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  mapSegBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, backgroundColor: C.bg, borderWidth: 1.5, borderColor: C.line },
+  mapSegOn: { backgroundColor: C.roseSoft, borderColor: C.rose },
+  mapSegTxt: { color: C.muted, fontSize: 13.5, fontWeight: '700' },
+  mapSegTxtOn: { color: C.roseDeep },
   ledgerItem: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 11 },
   ledgerImg: { width: 44, height: 44, borderRadius: 10, backgroundColor: C.bg },
   ledgerName: { color: C.ink, fontSize: 14, fontWeight: '700' },
