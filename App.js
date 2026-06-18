@@ -77,62 +77,71 @@ function localSearchUrl(country, term) {
 const POPULAR = {
   jp: [
     { c: '藥妝・保健', e: '💊', list: [
-      { zh: '龍角散喉糖', term: '龍角散 のど飴' },
-      { zh: 'EVE 止痛藥', term: 'イブ 鎮痛' },
-      { zh: '太田胃散', term: '太田胃散' },
-      { zh: '命之母', term: '命の母' },
-      { zh: '合利他命', term: 'アリナミン EX' },
-      { zh: '休足時間', term: '休足時間 シート' },
-      { zh: '小林退熱貼', term: '熱さまシート' },
-      { zh: '樂敦 Vita40 眼藥水', term: 'ロート Vロート' },
-      { zh: '表飛鳴整腸', term: '新ビオフェルミンS' },
+      { zh: '龍角散喉糖', term: '龍角散 のど飴', d: '草本喉糖，潤喉緩解乾癢，外出常備。' },
+      { zh: 'EVE 止痛藥', term: 'イブ 鎮痛', d: '日本熱賣止痛藥，緩解頭痛、生理痛。' },
+      { zh: '太田胃散', term: '太田胃散', d: '百年胃腸藥，緩解胃脹、消化不良。' },
+      { zh: '命之母', term: '命の母', d: '女性生理與更年期調理保健品。' },
+      { zh: '合利他命', term: 'アリナミン EX', d: '維他命 B 群，緩解疲勞、肩頸痠痛。' },
+      { zh: '休足時間', term: '休足時間 シート', d: '貼式舒緩貼片，久站走路後敷腿。' },
+      { zh: '小林退熱貼', term: '熱さまシート', d: '退熱貼片，發燒降溫、消暑用。' },
+      { zh: '樂敦 Vita40 眼藥水', term: 'ロート Vロート', d: '含維他命眼藥水，舒緩疲勞乾澀。' },
+      { zh: '表飛鳴整腸', term: '新ビオフェルミンS', d: '益生菌整腸，改善脹氣、調整腸道。' },
     ]},
     { c: '保健食品（DHC）', e: '🫐', list: [
-      { zh: 'DHC 藍莓精華', term: 'DHC ブルーベリー' },
-      { zh: 'DHC 葉黃素', term: 'DHC ルテイン' },
-      { zh: 'DHC 維他命C', term: 'DHC ビタミンC' },
-      { zh: 'DHC 膠原蛋白', term: 'DHC コラーゲン' },
-      { zh: 'DHC 維他命B群', term: 'DHC ビタミンBミックス' },
-      { zh: 'DHC 魚油 DHA', term: 'DHC DHA' },
+      { zh: 'DHC 藍莓精華', term: 'DHC ブルーベリー', d: '藍莓萃取護眼保健，3C 族愛用。' },
+      { zh: 'DHC 葉黃素', term: 'DHC ルテイン', d: '葉黃素補給，長時間用眼者保養。' },
+      { zh: 'DHC 維他命C', term: 'DHC ビタミンC', d: '高單位維他命 C，抗氧化養顏。' },
+      { zh: 'DHC 膠原蛋白', term: 'DHC コラーゲン', d: '膠原蛋白補給，養顏美容。' },
+      { zh: 'DHC 維他命B群', term: 'DHC ビタミンBミックス', d: 'B 群補給，提振精神、幫助代謝。' },
+      { zh: 'DHC 魚油 DHA', term: 'DHC DHA', d: '深海魚油 DHA，補腦健康保健。' },
     ]},
     { c: '美妝・保養', e: '💄', list: [
-      { zh: '花王蒸氣眼罩', term: 'めぐりズム 蒸気でホットアイマスク' },
-      { zh: 'Senka 洗面乳', term: '専科 パーフェクトホイップ' },
-      { zh: 'DHC 護唇膏', term: 'DHC 薬用リップクリーム' },
-      { zh: '曼秀雷敦 AD 乳液', term: 'メンソレータム AD クリーム' },
-      { zh: 'CANMAKE 腮紅', term: 'キャンメイク クリームチーク' },
-      { zh: 'KOSE 雪肌精', term: 'コーセー 雪肌精' },
+      { zh: '花王蒸氣眼罩', term: 'めぐりズム 蒸気でホットアイマスク', d: '蒸氣熱敷眼罩，放鬆紓壓助眠。' },
+      { zh: 'Senka 洗面乳', term: '専科 パーフェクトホイップ', d: '綿密泡泡洗面乳，溫和潔顏。' },
+      { zh: 'DHC 護唇膏', term: 'DHC 薬用リップクリーム', d: '保濕護唇膏，滋潤修護乾唇。' },
+      { zh: '曼秀雷敦 AD 乳液', term: 'メンソレータム AD クリーム', d: '止癢保濕乳，乾癢敏感肌適用。' },
+      { zh: 'CANMAKE 腮紅', term: 'キャンメイク クリームチーク', d: '平價膏狀腮紅，自然好上色。' },
+      { zh: 'KOSE 雪肌精', term: 'コーセー 雪肌精', d: '經典美白化妝水，提亮保濕。' },
     ]},
     { c: '零食・食品', e: '🍫', list: [
-      { zh: '白色戀人', term: '白い恋人' },
-      { zh: '薯條三兄弟', term: 'じゃがポックル' },
-      { zh: 'KitKat 抹茶', term: 'キットカット 抹茶' },
-      { zh: 'Royce 生巧克力', term: 'ロイズ 生チョコレート' },
-      { zh: '東京香蕉', term: '東京ばな奈' },
-      { zh: 'Jagabee 薯條', term: 'じゃがビー' },
+      { zh: '白色戀人', term: '白い恋人', d: '北海道貓舌餅夾白巧克力，經典伴手禮。' },
+      { zh: '薯條三兄弟', term: 'じゃがポックル', d: '北海道薯條餅乾，香脆涮嘴。' },
+      { zh: 'KitKat 抹茶', term: 'キットカット 抹茶', d: '抹茶威化巧克力，日本限定口味。' },
+      { zh: 'Royce 生巧克力', term: 'ロイズ 生チョコレート', d: '入口即化生巧克力，需冷藏。' },
+      { zh: '東京香蕉', term: '東京ばな奈', d: '香蕉造型海綿蛋糕，東京名產。' },
+      { zh: 'Jagabee 薯條', term: 'じゃがビー', d: '真材實料薯條餅，原味鹹香。' },
     ]},
   ],
   kr: [
     { c: '美妝・保養', e: '💄', list: [
-      { zh: '雪花秀潤燥精華', term: '설화수 자음생에센스' },
-      { zh: 'numbuzin 數字面膜', term: '넘버즈인 마스크팩' },
-      { zh: 'Anua 魚腥草化妝水', term: '아누아 어성초 토너' },
-      { zh: 'Torriden 玻尿酸精華', term: '토리든 다이브인 세럼' },
-      { zh: '蘭芝睡眠唇膜', term: '라네즈 슬리핑 마스크' },
-      { zh: 'Mediheal 面膜', term: '메디힐 마스크팩' },
-      { zh: '朝鮮美女精華', term: '조선미녀 맑은쌀 선크림' },
+      { zh: '雪花秀潤燥精華', term: '설화수 자음생에센스', d: '韓方高級保養，滋潤抗老精華。' },
+      { zh: 'numbuzin 數字面膜', term: '넘버즈인 마스크팩', d: '數字系列面膜，主打提亮保濕。' },
+      { zh: 'Anua 魚腥草化妝水', term: '아누아 어성초 토너', d: '魚腥草舒緩化妝水，鎮定泛紅肌。' },
+      { zh: 'Torriden 玻尿酸精華', term: '토리든 다이브인 세럼', d: '低分子玻尿酸，深層保濕補水。' },
+      { zh: 'medicube 膠原緊緻精華', term: '메디큐브 콜라겐', d: '當紅醫美級品牌，膠原緊緻保養。' },
+      { zh: 'TIRTIR 氣墊粉底', term: '티르티르 마스크핏 쿠션', d: '高遮瑕氣墊，持妝服貼爆紅。' },
+      { zh: '魔女工廠卸妝油', term: '마녀공장 퓨어 클렌징오일', d: '溫和卸妝油，乳化快、不殘妝。' },
+      { zh: 'skin1004 積雪草安瓶', term: '스킨천사 센텔라 앰플', d: '積雪草安瓶，鎮定修護敏弱肌。' },
+      { zh: 'VT 微針面膜 리들샷', term: '브이티 리들샷', d: '微針保養（리들샷），緊緻平滑爆紅。' },
+      { zh: '蘭芝睡眠唇膜', term: '라네즈 슬리핑 마스크', d: '晚安唇膜，過夜修護乾唇。' },
+      { zh: 'Mediheal 面膜', term: '메디힐 마스크팩', d: '國民面膜，多機能、CP 值高。' },
+      { zh: '朝鮮美女精華／防曬', term: '조선미녀 맑은쌀 선크림', d: '米萃取溫和保養，防曬也熱賣。' },
     ]},
     { c: '保健・生活', e: '💊', list: [
-      { zh: '馬油', term: '마유 크림' },
-      { zh: '正官庄紅蔘', term: '정관장 홍삼' },
-      { zh: '蜂蜜柚子茶', term: '꿀 유자차' },
+      { zh: '馬油', term: '마유 크림', d: '保濕馬油霜，乾燥肌全身可用。' },
+      { zh: '正官庄紅蔘', term: '정관장 홍삼', d: '高麗紅蔘補品，補氣養生、送禮。' },
+      { zh: '蜂蜜柚子茶', term: '꿀 유자차', d: '柚子蜂蜜茶醬，沖泡暖飲。' },
+      { zh: '韓國益生菌', term: '유산균', d: '腸道益生菌補給，調整體質。' },
     ]},
     { c: '零食・泡麵', e: '🍜', list: [
-      { zh: '辛拉麵', term: '신라면' },
-      { zh: '韓國海苔', term: '김 조미김' },
-      { zh: '蜂蜜奶油杏仁', term: '허니버터아몬드' },
-      { zh: '部隊鍋拉麵', term: '부대찌개 라면' },
-      { zh: '養樂多軟糖', term: '야쿠르트 젤리' },
+      { zh: '辛拉麵', term: '신라면', d: '國民辣味泡麵，經典必買。' },
+      { zh: '火雞辣雞麵', term: '삼양 불닭볶음면', d: '超人氣辣雞炒麵，挑戰辣度。' },
+      { zh: '炸醬泡麵', term: '짜파게티', d: '國民炸醬泡麵，香濃微甜。' },
+      { zh: '韓國海苔', term: '김 조미김', d: '調味海苔，下飯、零嘴皆宜。' },
+      { zh: '蜂蜜奶油杏仁', term: '허니버터아몬드', d: 'HBAF 蜂蜜奶油杏仁，甜鹹涮嘴。' },
+      { zh: '烏龜玉米餅 꼬북칩', term: '꼬북칩', d: '4 層酥脆玉米餅，玉米濃湯味爆紅。' },
+      { zh: '香蕉牛奶', term: '바나나맛 우유', d: '人氣香蕉牛奶，香甜濃郁。' },
+      { zh: '巧克力派', term: '오리온 초코파이', d: '棉花糖夾心巧克力派，經典。' },
     ]},
   ],
 };
@@ -263,6 +272,7 @@ export default function App() {
   const [aiTip, setAiTip] = useState(false); // 首次拍照提示彈窗
   const [aiTipSeen, setAiTipSeen] = useState(false); // 是否看過首次提示(存 settings)
   const [guide, setGuide] = useState(false); // 使用說明彈窗
+  const [popInfo, setPopInfo] = useState(null); // 熱門品介紹卡 {zh, term, d, e}
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
   useFonts(Ionicons.font);
 
@@ -402,7 +412,11 @@ export default function App() {
     setItems(updated);
   }
   // 從熱門庫/建議加入：term 先對好當地關鍵字，加完自動查價（中位數）
-  const addPopular = (p) => { const it = addItem(p.zh); if (it) { update(it.id, { term: p.term }); queryOne({ ...it, term: p.term }); } };
+  // 實際把熱門品加入清單並查價
+  const addPopularItem = (p) => { const it = addItem(p.zh); if (it) { update(it.id, { term: p.term }); queryOne({ ...it, term: p.term }); } };
+  // 熱門必買面板：點擊先跳介紹卡，再決定加入
+  const addPopular = (p) => setPopInfo(p);
+  const confirmAddPopular = () => { const p = popInfo; setPopInfo(null); if (p) addPopularItem(p); };
   const suggestions = useMemo(() => popularMatches(country, input), [input, country]);
 
   function completeItem(item) { update(item.id, { status: 'bought', store: item.store || '', boughtLocal: item.price ? item.price.price : 0 }); showToast(`已移到記帳：${item.name}`, () => update(item.id, { status: 'todo' })); }
@@ -573,7 +587,6 @@ export default function App() {
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity style={styles.scanBtn} onPress={() => aiTipSeen ? scanImage(true) : setAiTip(true)} activeOpacity={0.85} accessibilityLabel="AI 產品辨識"><Ionicons name="camera" size={18} color={C.roseDeep} /><Text style={styles.scanBtnTxt}>AI 產品辨識</Text></TouchableOpacity>
             <TouchableOpacity style={styles.calcBtn} onPress={() => setCalc({ cur: country, dir: 'toTWD', amt: '' })} activeOpacity={0.8} accessibilityLabel="匯率計算機"><Ionicons name="calculator-outline" size={20} color="#fff" /></TouchableOpacity>
-            <TouchableOpacity style={styles.calcBtn} onPress={() => setGuide(true)} activeOpacity={0.8} accessibilityLabel="使用說明"><Ionicons name="help-circle-outline" size={21} color="#fff" /></TouchableOpacity>
           </View>
         </View>
         <View style={styles.heroSeg}>
@@ -630,6 +643,7 @@ export default function App() {
               <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="bag-handle-outline" size={40} color={C.rose} /></View><Text style={styles.emptyBig}>清單還是空的</Text><Text style={styles.empty}>打上商品名稱，或用右上「AI 產品辨識」拍照{'\n'}加好後按「查價」，幫你比當地價、即時換算台幣 💰</Text></View>
             )}
             {todoCards}
+            <TouchableOpacity style={styles.guideLink} onPress={() => setGuide(true)} activeOpacity={0.7}><Ionicons name="help-circle-outline" size={15} color={C.muted} /><Text style={styles.guideLinkTxt}>使用說明</Text></TouchableOpacity>
           </ScrollView>
         </>
       ) : (
@@ -684,6 +698,7 @@ export default function App() {
               <Ionicons name="flag" size={16} color={C.rose} /><Text style={styles.endTripTxt}>結束這趟旅行・看結算</Text>
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={styles.guideLink} onPress={() => setGuide(true)} activeOpacity={0.7}><Ionicons name="help-circle-outline" size={15} color={C.muted} /><Text style={styles.guideLinkTxt}>使用說明</Text></TouchableOpacity>
         </ScrollView>
       )}
 
@@ -731,6 +746,22 @@ export default function App() {
             <Text style={styles.aiTipTitle}>拍照小撇步</Text>
             <Text style={styles.aiTipBody}>盡量拍到<Text style={{ fontWeight: '800' }}>完整包裝與品牌 Logo</Text>，並對準商品名稱、光線充足、避免反光與模糊，辨識會更準喔！</Text>
             <TouchableOpacity style={[styles.storeSave, { marginTop: 18 }]} onPress={() => { setAiTip(false); setAiTipSeen(true); scanImage(true); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>知道了，開始拍照</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 熱門品介紹卡：點熱門品先看介紹再決定加入 */}
+      <Modal visible={!!popInfo} transparent animationType="fade" onRequestClose={() => setPopInfo(null)}>
+        <View style={styles.centerBackdrop}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setPopInfo(null)} />
+          <View style={styles.storeModal}>
+            <Text style={styles.popInfoEmoji}>{popInfo?.e || '🛍️'}</Text>
+            <Text style={styles.popInfoName}>{popInfo?.zh}</Text>
+            {popInfo?.d ? <View style={styles.scanInfoBox}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.scanInfo}>{popInfo.d}</Text></View> : null}
+            <Text style={styles.popInfoHint}>加入後會自動到當地比價、換算台幣 💰</Text>
+            <TouchableOpacity style={[styles.storeSave, { marginTop: 14 }]} onPress={confirmAddPopular} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>加入清單並比價</Text></TouchableOpacity>
+            <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setPopInfo(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
+            <Text style={styles.scanDisclaim}>僅提供產品資訊參考，不作為購物建議</Text>
           </View>
         </View>
       </Modal>
@@ -1141,6 +1172,9 @@ const styles = StyleSheet.create({
   scanReviewBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 10, borderRadius: 11, backgroundColor: C.bg },
   scanReviewTxt: { color: C.inkSoft, fontWeight: '700', fontSize: 13 },
   scanDisclaim: { color: C.muted, fontSize: 10.5, textAlign: 'center', marginTop: 6 },
+  popInfoEmoji: { fontSize: 34, textAlign: 'center' },
+  popInfoName: { fontSize: 18, fontWeight: '900', color: C.ink, textAlign: 'center', marginTop: 6 },
+  popInfoHint: { color: C.muted, fontSize: 12, textAlign: 'center', marginTop: 10 },
   scanAskHint: { color: C.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
   aiTipEmoji: { fontSize: 36, textAlign: 'center', marginBottom: 4 },
   aiTipTitle: { fontSize: 18, fontWeight: '900', color: C.ink, textAlign: 'center', marginBottom: 8 },
@@ -1216,6 +1250,8 @@ const styles = StyleSheet.create({
   guideHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', alignSelf: 'stretch', marginBottom: 12 },
   guideTitle: { fontSize: 20, fontWeight: '900', color: C.ink, letterSpacing: 0.5 },
   guideFoot: { color: C.muted, fontSize: 11.5, lineHeight: 18, marginTop: 6, marginBottom: 2 },
+  guideLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 16, marginTop: 4 },
+  guideLinkTxt: { color: C.muted, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
   onboardBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 16, letterSpacing: 1 },
 
   endTripBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.rose, borderRadius: 14, paddingVertical: 14, marginTop: 4, marginBottom: 8 },
