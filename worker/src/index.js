@@ -318,6 +318,8 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
  .bcount{color:#A89C92;font-size:12px;font-weight:700}
  .bbody{padding:8px 11px 11px}
  .item{background:#FBF7F2;border-radius:12px;padding:10px;margin-bottom:9px;border:1px solid #ECE1D8}
+ .item.isnew{box-shadow:0 0 0 2px #E0567C;border-color:#E0567C;background:#FFF6F9}
+ .newbadge{display:inline-block;background:#E0567C;color:#fff;font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px}
  .ihead{display:flex;gap:10px}
  .thumb{width:60px;height:60px;border-radius:9px;object-fit:cover;background:#EEE6DE;flex:none}
  .thumb.none{display:grid;place-items:center;color:#C9251E;font-size:10px;font-weight:800;text-align:center;line-height:1.2;border:1.5px dashed #E7A6A2;background:#FCEEED}
@@ -373,7 +375,8 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
   </div>
   <div class="bar">
    <button class="sm" @click="addEmpty()">＋ 空白筆</button>
-   <button class="sm" @click="addAiOne()">✨ AI 新增單品</button>
+   <button class="sm" @click="addForm={brand:'',name:'',busy:false}">✨ AI 新增單品</button>
+   <button class="sm" @click="batchForm={text:'',busy:false,done:0,total:0}">📋 批次新增</button>
    <button class="sm" @click="addBrandAuto()">🏷️ 新增品牌(自動找)</button>
    <button class="ghost sm" @click="enrichAll()">🔄 整批補圖文</button>
   </div>
@@ -394,9 +397,10 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
     <div class="bbody" x-show="expand[g.brand]">
      <div x-sort="(id,pos)=>moveInGroup(g.brand,id,pos)" x-sort:config="{ handle: '.grip' }">
       <template x-for="it in g.items" :key="it._id">
-       <div class="item" x-sort:item="it._id">
+       <div class="item" :class="it._new&&'isnew'" x-sort:item="it._id">
         <div class="ihead">
          <span class="grip">⠿</span>
+         <span class="newbadge" x-show="it._new">新</span>
          <template x-if="it.image"><img class="thumb" :src="it.image" @error="$el.style.opacity=.3"></template>
          <template x-if="!it.image"><div class="thumb none">沒圖<br>App不顯示</div></template>
          <div style="flex:1">
@@ -453,6 +457,33 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
  <button x-show="undoBuf" @click="undo()">復原</button>
 </div>
 
+<div class="ov" x-show="addForm" @click.self="addForm=null" style="display:none"><template x-if="addForm">
+ <div class="card" style="max-width:340px">
+  <div class="pv-name" style="font-size:17px">✨ AI 新增單品</div>
+  <div class="field"><label>品牌（可留空）</label><input x-model="addForm.brand" placeholder="例：numbuzin"></div>
+  <div class="field"><label>產品名稱</label><input x-model="addForm.name" placeholder="例：numbuzin 5號精華" @keydown.enter="aiAdd()"></div>
+  <p class="muted" style="margin-top:8px">AI 會自動補：關鍵字、分類、圖示、簡介、主打效果並抓商品圖</p>
+  <div class="iact" style="margin-top:12px">
+   <button @click="aiAdd()" :disabled="addForm?.busy" x-text="addForm?.busy?'AI 帶入中…':'✨ AI 帶入'"></button>
+   <button class="ghost" @click="addForm=null" :disabled="addForm?.busy">取消</button>
+  </div>
+ </div>
+</template></div>
+
+<div class="ov" x-show="batchForm" @click.self="batchForm&&!batchForm.busy&&(batchForm=null)" style="display:none"><template x-if="batchForm">
+ <div class="card" style="max-width:360px">
+  <div class="pv-name" style="font-size:17px">📋 批次新增</div>
+  <p class="muted">一行一筆，格式「品牌 產品名」，AI 一次撈好整批</p>
+  <textarea x-model="batchForm.text" placeholder="numbuzin 5號精華
+medicube 膠原蛋白霜
+Anua 蜂蜜面膜" style="min-height:140px"></textarea>
+  <div class="iact" style="margin-top:12px">
+   <button @click="runBatch()" :disabled="batchForm?.busy" x-text="batchForm?.busy?('處理中 '+batchForm.done+'/'+batchForm.total):'✨ AI 一次帶入'"></button>
+   <button class="ghost" @click="batchForm=null" :disabled="batchForm?.busy">取消</button>
+  </div>
+ </div>
+</template></div>
+
 <div class="ov" x-show="pv" @click.self="pv=null" style="display:none">
  <div class="card" x-show="pv">
   <template x-if="pv&&pv.image"><img class="pvimg" :src="pv.image"></template>
@@ -469,7 +500,7 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
 function admin(){return{
  token:'',loggedIn:false,err:'',cur:'jp',q:'',
  data:{published:{jp:[],kr:[]},candidates:{jp:[],kr:[]}},
- expand:{},sel:{},pv:null,toast:'',undoBuf:null,saving:false,dirty:false,uid:1,_tt:null,_dt:null,
+ expand:{},sel:{},pv:null,addForm:null,batchForm:null,toast:'',undoBuf:null,saving:false,dirty:false,uid:1,_tt:null,_dt:null,
  cats:['美妝・保養','藥妝・保健','零食・食品','生活雜貨'],
  emos:['💄','💊','🍫','🧴','🍜','🍵','🧷','🛍️'],
  init(){var s=this;var t=localStorage.getItem('oytok');if(t){this.token=t;this.login(true)}
@@ -506,20 +537,31 @@ function admin(){return{
   var at=pos>=gi.length?(gi.length?gi[gi.length-1]+1:arr.length):gi[pos];
   arr.splice(at,0,item);this.dirty=true;
  },
- addEmpty(){var it={_id:this.uid++,brand:'',zh:'',term:'',c:'',e:'🛍️',info:'',claim:'',d:'',image:''};this.list().unshift(it);this.expand[this.brandOf(it)]=true},
- addAiOne(){var s=this;var name=prompt('輸入「品牌 品名」（例：numbuzin 5號精華）：');if(!name)return;
-  var brand=prompt('品牌名（可留空，會歸到品名首字）：')||'';
-  s.toast='AI 產生中…';
-  s.api('/admin/aifill?country='+s.cur+'&brand='+encodeURIComponent(brand)+'&name='+encodeURIComponent(name)).then(function(r){return r.json()}).then(function(d){
-   s.toast='';if(!d.ok){alert('失敗：'+(d.error||''));return}
-   var it=Object.assign({_id:s.uid++,brand:brand,zh:name,d:''},d.item);s.list().unshift(it);s.expand[s.brandOf(it)]=true;s.dirty=true;s.flash('已新增，記得儲存');
-  }).catch(function(){s.toast='';alert('連線失敗')});
+ addEmpty(){var it={_id:this.uid++,_new:true,brand:'',zh:'',term:'',c:'',e:'🛍️',info:'',claim:'',d:'',image:''};this.list().unshift(it);this.expand[this.brandOf(it)]=true;this.dirty=true},
+ aiAdd(){var s=this,f=this.addForm;if(!f.name.trim()){alert('請填產品名稱');return}f.busy=true;
+  this.api('/admin/aifill?country='+this.cur+'&brand='+encodeURIComponent(f.brand||'')+'&name='+encodeURIComponent(f.name)).then(function(r){return r.json()}).then(function(d){
+   f.busy=false;if(!d.ok){alert('失敗：'+(d.error||''));return}
+   var it=Object.assign({_id:s.uid++,_new:true,brand:f.brand,zh:f.name,d:''},d.item);s.list().unshift(it);s.expand[s.brandOf(it)]=true;s.dirty=true;s.addForm=null;s.flash('已新增「'+f.name+'」');
+  }).catch(function(){f.busy=false;alert('連線失敗')});
+ },
+ runBatch(){var s=this;var lines=this.batchForm.text.split('\\n').map(function(x){return x.trim()}).filter(Boolean);
+  if(!lines.length){alert('請貼上至少一行');return}
+  this.batchForm.busy=true;this.batchForm.total=lines.length;this.batchForm.done=0;var i=0;
+  function next(){
+   if(i>=lines.length){var n=s.batchForm.done;s.batchForm.busy=false;s.batchForm=null;s.flash('批次完成，新增 '+n+' 筆');return}
+   var line=lines[i];var sp=line.indexOf(' ');var brand=sp>0?line.slice(0,sp):'';var prod=sp>0?line.slice(sp+1):line;
+   s.api('/admin/aifill?country='+s.cur+'&brand='+encodeURIComponent(brand)+'&name='+encodeURIComponent(prod)).then(function(r){return r.json()}).then(function(d){
+    if(d.ok&&d.item){var it=Object.assign({_id:s.uid++,_new:true,brand:brand,zh:line,d:''},d.item);s.list().unshift(it);s.expand[s.brandOf(it)]=true;s.dirty=true}
+    i++;s.batchForm.done=i;next();
+   }).catch(function(){i++;s.batchForm.done=i;next()});
+  }
+  next();
  },
  addBrandAuto(){var s=this;var b=prompt('輸入品牌（例 numbuzin、DHC、Anua），自動找熱門品項：');if(!b)return;
   s.toast='搜尋「'+b+'」中…';
   s.api('/admin/brandfill?country='+s.cur+'&brand='+encodeURIComponent(b)).then(function(r){return r.json()}).then(function(d){
    s.toast='';if(!d.ok||!d.items||!d.items.length){alert('找不到該品牌熱門品項');return}
-   d.items.forEach(function(it){it._id=s.uid++;it.d=it.info||it.d||'';s.list().push(it)});s.expand[b]=true;s.dirty=true;s.flash('已加入 '+d.items.length+' 個「'+b+'」品項');
+   d.items.forEach(function(it){it._id=s.uid++;it._new=true;it.d=it.info||it.d||'';s.list().push(it)});s.expand[b]=true;s.dirty=true;s.flash('已加入 '+d.items.length+' 個「'+b+'」品項');
   }).catch(function(){s.toast='';alert('連線失敗')});
  },
  refreshImg(it){var s=this;if(!it.term){alert('先填關鍵字');return}it._busy=true;
@@ -547,7 +589,7 @@ function admin(){return{
  stripBrand(zh,brand){zh=zh||'';brand=(brand||'').trim();if(!brand)return zh;var r=zh;[brand,brand.toUpperCase(),brand.toLowerCase()].forEach(function(b){if(b&&r.indexOf(b)==0)r=r.slice(b.length).replace(/^[\\s·・-]+/,'')});return r||zh},
  cands(){return this.data.candidates[this.cur]||[]},
  isDup(c){return this.list().some(function(it){return (it.zh||'')==(c.zh||'')})},
- addCand(c){var it=JSON.parse(JSON.stringify(c));it._id=this.uid++;it.d=it.info||it.d||'';this.list().push(it);this.expand[this.brandOf(it)]=true;this.dirty=true;this.flash('已加入 '+(c.zh||''))},
+ addCand(c){var it=JSON.parse(JSON.stringify(c));it._id=this.uid++;it._new=true;it.d=it.info||it.d||'';this.list().push(it);this.expand[this.brandOf(it)]=true;this.dirty=true;this.flash('已加入 '+(c.zh||''))},
  addAllCands(){var s=this;this.cands().forEach(function(c){if(!s.isDup(c))s.addCand(c)})},
  skipCand(ci){this.cands().splice(ci,1)},
  flash(m){var s=this;this.toast=m;clearTimeout(this._tt);this._tt=setTimeout(function(){if(!s.undoBuf||s.toast==m)s.toast=''},4000)},
@@ -555,7 +597,7 @@ function admin(){return{
   this.list().forEach(function(it){it.d=it.info||it.d||''});
   var clean=function(a){return (a||[]).map(function(it){var o={};for(var k in it)if(k.charAt(0)!='_')o[k]=it[k];return o})};
   fetch('/admin/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:this.token,jp:clean(this.data.published.jp),kr:clean(this.data.published.kr)})})
-  .then(function(r){return r.json()}).then(function(d){s.saving=false;if(d.ok){s.dirty=false;try{localStorage.removeItem('oydraft')}catch(e){}s.flash('已儲存 ✅ App 重新整理即生效')}else alert('儲存失敗')}).catch(function(){s.saving=false;alert('連線失敗')});
+  .then(function(r){return r.json()}).then(function(d){s.saving=false;if(d.ok){s.dirty=false;['jp','kr'].forEach(function(c){(s.data.published[c]||[]).forEach(function(it){it._new=false})});try{localStorage.removeItem('oydraft')}catch(e){}s.flash('已儲存 ✅ App 重新整理即生效')}else alert('儲存失敗')}).catch(function(){s.saving=false;alert('連線失敗')});
  },
 }}
 </script></body></html>`;
