@@ -1093,22 +1093,30 @@ export default function App() {
             {!storeEdit?.place ? <Text style={styles.spotPasteHint}>🔗 也可以直接貼上 Google／Naver 地圖連結</Text> : null}
 
             {storeEdit?.place ? (
+              <>
               <View style={styles.spotBound}>
                 <Ionicons name="location" size={16} color={C.roseDeep} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.spotBoundName} numberOfLines={1}>{storeEdit.val}</Text>
+                  {storeEdit.place.local ? <Text style={styles.spotBoundLocal} numberOfLines={1}>{storeEdit.place.local}</Text> : null}
                   {storeEdit.place.address ? <Text style={styles.spotBoundAddr} numberOfLines={1}>{storeEdit.place.address}</Text> : null}
                 </View>
                 <View style={styles.spotBoundOk}><Ionicons name="checkmark" size={13} color="#fff" /></View>
                 <TouchableOpacity onPress={() => setStoreEdit(s => ({ ...s, place: null }))} hitSlop={8} accessibilityLabel="解除綁定"><Ionicons name="close" size={16} color={C.muted} /></TouchableOpacity>
               </View>
+              <TouchableOpacity activeOpacity={0.9} onPress={() => openUrl(spotMapUrl(storeEdit.val, storeEdit.country, { provider: storeEdit.provider || (storeEdit.country === 'kr' ? 'naver' : 'google'), ...storeEdit.place }))}>
+                <Image source={{ uri: `${WORKER_URL}/staticmap?${(storeEdit.place.lat != null && storeEdit.place.lon != null) ? `lat=${storeEdit.place.lat}&lon=${storeEdit.place.lon}` : `q=${encodeURIComponent((storeEdit.val || '') + ' ' + (storeEdit.place.address || ''))}`}` }} style={styles.spotMap} resizeMode="cover" />
+                <Text style={styles.spotMapHint}>📍 點地圖開大圖確認 ›</Text>
+              </TouchableOpacity>
+              </>
             ) : (storeEdit?.results && storeEdit.results.length) ? (
               <View style={styles.spotResults}>
                 {storeEdit.results.map((r, i) => (
-                  <TouchableOpacity key={i} style={[styles.spotResult, i > 0 && styles.spotResultDiv]} activeOpacity={0.7} onPress={() => setStoreEdit(s => ({ ...s, val: r.name, place: { address: r.address, lat: r.lat, lon: r.lon }, results: [] }))}>
+                  <TouchableOpacity key={i} style={[styles.spotResult, i > 0 && styles.spotResultDiv]} activeOpacity={0.7} onPress={() => setStoreEdit(s => ({ ...s, val: r.name, place: { address: r.address, lat: r.lat, lon: r.lon, local: r.local || '' }, results: [] }))}>
                     <Ionicons name="location-outline" size={15} color={C.rose} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.spotResultName} numberOfLines={1}>{r.name}{r.rating ? <Text style={styles.spotResultStar}> ★{r.rating}</Text> : null}</Text>
+                      {r.local ? <Text style={styles.spotResultLocal} numberOfLines={1}>{r.local}</Text> : null}
                       {r.address ? <Text style={styles.spotResultAddr} numberOfLines={1}>{r.address}</Text> : null}
                     </View>
                   </TouchableOpacity>
@@ -1485,11 +1493,15 @@ const styles = StyleSheet.create({
   spotResultDiv: { borderTopWidth: 1, borderTopColor: C.line },
   spotResultName: { color: C.ink, fontSize: 14.5, fontWeight: '700' },
   spotResultStar: { color: C.gold, fontSize: 12.5, fontWeight: '800' },
+  spotResultLocal: { color: C.inkSoft, fontSize: 12, marginTop: 1 },
   spotResultAddr: { color: C.muted, fontSize: 12, marginTop: 1 },
+  spotMap: { width: '100%', height: 150, borderRadius: 12, marginTop: 8, backgroundColor: C.bg },
+  spotMapHint: { color: C.muted, fontSize: 11.5, marginTop: 6, textAlign: 'center' },
   spotEmpty: { color: C.muted, fontSize: 12.5, marginTop: 10, lineHeight: 18 },
   spotPasteHint: { color: C.muted, fontSize: 11.5, marginTop: 7 },
   spotBound: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: C.roseSoft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, marginTop: 8 },
   spotBoundName: { color: C.roseDeep, fontSize: 14.5, fontWeight: '800' },
+  spotBoundLocal: { color: C.inkSoft, fontSize: 12, marginTop: 1 },
   spotBoundAddr: { color: C.inkSoft, fontSize: 12, marginTop: 1 },
   spotBoundOk: { width: 20, height: 20, borderRadius: 10, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center' },
   mapSeg: { flexDirection: 'row', gap: 8, marginTop: 8 },

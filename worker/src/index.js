@@ -49,23 +49,21 @@ function json(obj, status = 200) {
 async function googlePlaces(env, q, country) {
   if (!env.GOOGLE_MAPS_KEY) return [];
   const region = country === 'kr' ? 'KR' : 'JP';
-  const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+  const localLang = country === 'kr' ? 'ko' : 'ja';
+  const call = lang => fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': env.GOOGLE_MAPS_KEY,
-      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.rating',
-    },
-    // 名稱優先繁體中文（Google 有中文用中文、沒有則退英文羅馬拼音）
-    body: JSON.stringify({ textQuery: q, languageCode: 'zh-TW', regionCode: region, maxResultCount: 6 }),
+    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': env.GOOGLE_MAPS_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating' },
+    body: JSON.stringify({ textQuery: q, languageCode: lang, regionCode: region, maxResultCount: 6 }),
+  }).then(r => r.json()).catch(() => ({}));
+  // 主名繁中(zh-TW)、副名當地原文(ja/ko)；兩次查詢用 place id 配對
+  const [zh, loc] = await Promise.all([call('zh-TW'), call(localLang)]);
+  const localById = {};
+  for (const p of (loc.places || [])) localById[p.id] = p.displayName && p.displayName.text;
+  return (zh.places || []).map(p => {
+    const name = (p.displayName && p.displayName.text) || q;
+    const ln = localById[p.id] || '';
+    return { name, local: (ln && ln !== name) ? ln : '', address: p.formattedAddress || '', lat: p.location && p.location.latitude, lon: p.location && p.location.longitude, rating: p.rating || null };
   });
-  const d = await r.json();
-  return (d.places || []).map(p => ({
-    name: (p.displayName && p.displayName.text) || q,
-    address: p.formattedAddress || '',
-    lat: p.location && p.location.latitude, lon: p.location && p.location.longitude,
-    rating: p.rating || null,
-  }));
 }
 // 購物點：把貼上的 Google／Naver 地圖短連結解析成 {名稱,地址,座標}
 async function resolvePlace(link) {
@@ -95,10 +93,17 @@ async function naverLocal(env, q) {
   });
   const d = await r.json();
   const strip = s => String(s || '').replace(/<[^>]+>/g, '');
-  return (d.items || []).map(it => ({
-    name: strip(it.title), address: it.roadAddress || it.address || '',
-    lat: null, lon: null, rating: null,
-  }));
+  const items = (d.items || []).map(it => ({ ko: strip(it.title), address: it.roadAddress || it.address || '' }));
+  // 韓文店名翻成繁中當主名、韓文留作副名（當地原文）
+  let zhNames = [];
+  if (items.length) {
+    try {
+      const prompt = `把以下韓文店名「翻譯成繁體中文」(品牌/地名用通用譯名、保留分店資訊，如 올리브영 명동중앙점→Olive Young 明洞中央店)。只回 JSON 字串陣列、順序與長度完全相同。\n${JSON.stringify(items.map(x => x.ko))}`;
+      const oa = await openaiChat(env, prompt, 800, 'gpt-4o-mini');
+      const m = (oa || '').match(/\[[\s\S]*\]/); zhNames = m ? JSON.parse(m[0]) : [];
+    } catch {}
+  }
+  return items.map((x, i) => ({ name: zhNames[i] || x.ko, local: (zhNames[i] && zhNames[i] !== x.ko) ? x.ko : '', address: x.address, lat: null, lon: null, rating: null }));
 }
 
 // 常見台灣客藥妝／伴手禮對照表（綽號/漢字品牌 → 當地搜尋字）
@@ -538,6 +543,18 @@ export default {
         const results = provider === 'naver' ? await naverLocal(env, q) : await googlePlaces(env, q, country);
         return json({ ok: true, results });
       } catch (e) { return json({ ok: true, results: [], error: String(e).slice(0, 120) }); }
+    }
+    // 購物點：小地圖確認（代理 Google Static Maps，金鑰留在後端）
+    if (url.pathname === '/staticmap') {
+      if (!env.GOOGLE_MAPS_KEY) return new Response('', { status: 404, headers: CORS });
+      const lat = url.searchParams.get('lat'), lon = url.searchParams.get('lon');
+      const q = (url.searchParams.get('q') || '').trim();
+      const center = (lat && lon) ? `${lat},${lon}` : q;
+      if (!center) return new Response('', { status: 400, headers: CORS });
+      const p = new URLSearchParams({ center, zoom: '16', size: '600x280', scale: '2', language: 'zh-TW', key: env.GOOGLE_MAPS_KEY });
+      p.append('markers', `color:red|${center}`);
+      const r = await fetch(`https://maps.googleapis.com/maps/api/staticmap?${p.toString()}`);
+      return new Response(r.body, { status: r.status, headers: { 'Content-Type': r.headers.get('content-type') || 'image/png', 'Cache-Control': 'public, max-age=86400', ...CORS } });
     }
     // 購物點：解析貼上的地圖短連結 → {名稱,地址,座標,url}
     if (url.pathname === '/resolveplace') {
