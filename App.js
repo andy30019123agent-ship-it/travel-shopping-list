@@ -300,6 +300,7 @@ export default function App() {
   const [popInfo, setPopInfo] = useState(null); // 熱門品介紹卡 {zh, term, d, e, image}
   const [remotePopular, setRemotePopular] = useState(null); // 從 worker 讀的發布熱門清單 {jp,kr}
   const [popExpand, setPopExpand] = useState({}); // 熱門面板：展開的品牌
+  const [kbInset, setKbInset] = useState(0); // 鍵盤高度(web)：讓置中彈窗避開鍵盤、不浮太高
   const [addBought, setAddBought] = useState(null); // 記帳頁手動新增已買 {country,name,val,store,note}
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
   useFonts(Ionicons.font);
@@ -310,6 +311,14 @@ export default function App() {
     fetch(`${WORKER_URL}/rate`).then(r => r.json()).then(d => { if (d.ok) setRates({ jpy: d.jpy, krw: d.krw }); }).catch(() => {});
   }, []);
   useEffect(() => { fetch(`${WORKER_URL}/popular`).then(r => r.json()).then(d => { if (d.ok) setRemotePopular({ jp: d.jp || [], kr: d.kr || [] }); }).catch(() => {}); }, []);
+  // web：偵測軟鍵盤高度（visualViewport），讓置中彈窗避開鍵盤、又不會浮在最頂端
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const onResize = () => setKbInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
+    vv.addEventListener('resize', onResize); vv.addEventListener('scroll', onResize); onResize();
+    return () => { vv.removeEventListener('resize', onResize); vv.removeEventListener('scroll', onResize); };
+  }, []);
   // picker 開啟時，把候選標題批次翻成繁中（一次一個 AI 呼叫）
   useEffect(() => {
     if (!picker || !(picker.candidates && picker.candidates.length) || picker.translating) return;
@@ -780,7 +789,7 @@ export default function App() {
 
       {/* 拍照識物卡 */}
       <Modal visible={!!scanResult} transparent animationType="fade" onRequestClose={() => setScanResult(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setScanResult(null)} />
           <View style={styles.storeModal}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: 560 }}>
@@ -812,7 +821,7 @@ export default function App() {
 
       {/* 首次使用 AI 辨識提示 */}
       <Modal visible={aiTip} transparent animationType="fade" onRequestClose={() => setAiTip(false)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setAiTip(false)} />
           <View style={styles.storeModal}>
             <Text style={styles.aiTipEmoji}>📸</Text>
@@ -825,7 +834,7 @@ export default function App() {
 
       {/* 熱門品介紹卡：點熱門品先看介紹再決定加入 */}
       <Modal visible={!!popInfo} transparent animationType="fade" onRequestClose={() => setPopInfo(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setPopInfo(null)} />
           <View style={styles.storeModal}>
             <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 540 }}>
@@ -855,7 +864,7 @@ export default function App() {
 
       {/* 低信心確認：你要找的是 XXX 嗎 */}
       <Modal visible={!!scanAsk} transparent animationType="fade" onRequestClose={() => setScanAsk(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setScanAsk(null)} />
           <View style={styles.storeModal}>
             <Text style={styles.sheetKicker}>🤔 不太確定…</Text>
@@ -964,7 +973,7 @@ export default function App() {
 
       {/* 店家編輯 */}
       <Modal visible={!!storeEdit} transparent animationType="fade" onRequestClose={() => setStoreEdit(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setStoreEdit(null)} />
           <View style={styles.storeModal}>
             <Text style={styles.sheetTitle}>這批在哪家買？</Text>
@@ -979,7 +988,7 @@ export default function App() {
 
       {/* 預算設定 */}
       <Modal visible={!!budgetEdit} transparent animationType="fade" onRequestClose={() => setBudgetEdit(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setBudgetEdit(null)} />
           <View style={styles.storeModal}>
             <Text style={styles.sheetTitle}>本趟預算（台幣）</Text>
@@ -994,7 +1003,7 @@ export default function App() {
 
       {/* 自填價格 */}
       <Modal visible={!!priceEdit} transparent animationType="fade" onRequestClose={() => setPriceEdit(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setPriceEdit(null)} />
           <View style={styles.storeModal}>
             <Text style={styles.sheetTitle}>我的實際購入價（{priceEdit?.currency}）</Text>
@@ -1006,7 +1015,7 @@ export default function App() {
 
       {/* 記帳頁手動新增已買 */}
       <Modal visible={!!addBought} transparent animationType="fade" onRequestClose={() => setAddBought(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setAddBought(null)} />
           <View style={styles.storeModal}>
             <Text style={styles.sheetTitle}>手動新增已買項目</Text>
@@ -1038,7 +1047,7 @@ export default function App() {
 
       {/* 匯率計算機 */}
       <Modal visible={!!calc} transparent animationType="fade" onRequestClose={() => setCalc(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setCalc(null)} />
           <View style={styles.storeModal}>
             <View style={styles.sheetHead}><View><Text style={styles.sheetKicker}>匯率計算機</Text><Text style={styles.sheetTitle}>快速換算</Text></View><TouchableOpacity onPress={() => setCalc(null)} hitSlop={10}><Ionicons name="close" size={24} color={C.muted} /></TouchableOpacity></View>
@@ -1059,7 +1068,7 @@ export default function App() {
       </Modal>
       {/* 旅行結算 */}
       <Modal visible={!!endTrip} transparent animationType="fade" onRequestClose={() => setEndTrip(null)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           {endTrip === 'confirm' ? (
             <View style={styles.onboardCard}>
               <Text style={styles.endEmoji}>🧹</Text>
@@ -1103,7 +1112,7 @@ export default function App() {
 
       {/* 首次導覽 */}
       <Modal visible={onboard} transparent animationType="fade" onRequestClose={() => setOnboard(false)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <View style={styles.onboardCard}>
             <Text style={styles.onboardEmoji}>🛍️</Text>
             <Text style={styles.onboardTitle}>歡迎用「免稅不是免費」</Text>
@@ -1120,7 +1129,7 @@ export default function App() {
 
       {/* 使用說明 */}
       <Modal visible={guide} transparent animationType="fade" onRequestClose={() => setGuide(false)}>
-        <View style={styles.centerBackdrop}>
+        <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setGuide(false)} />
           <View style={styles.onboardCard}>
             <View style={styles.guideHead}>
@@ -1360,7 +1369,7 @@ const styles = StyleSheet.create({
   pickerNoneTxt: { color: C.roseDeep, fontWeight: '800', fontSize: 13.5 },
 
   // 靠上對齊：iOS PWA 鍵盤升起不會推畫面，置中/靠底的輸入框會被鍵盤蓋住，改靠上方就不會被遮
-  centerBackdrop: { flex: 1, backgroundColor: 'rgba(46,36,32,0.55)', alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 26, paddingTop: 56 },
+  centerBackdrop: { flex: 1, backgroundColor: 'rgba(46,36,32,0.55)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 26, paddingVertical: 24 },
   storeModal: { backgroundColor: C.surface, borderRadius: 20, padding: 20, width: '100%' },
   storeInput: { backgroundColor: C.bg, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: C.ink, marginTop: 12, ...NO_OUTLINE },
   storeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
