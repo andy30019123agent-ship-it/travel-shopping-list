@@ -1092,14 +1092,19 @@ export default function App() {
               </>
             )}
 
-            <Text style={styles.scanLabel}>導航地圖</Text>
+            <Text style={styles.scanLabel}>點地圖直接搜這家（也設為導航用）</Text>
             <View style={styles.mapSeg}>
               {[['google', 'Google 地圖'], ['naver', 'Naver 地圖']].map(([k, label]) => {
                 const on = (storeEdit?.provider || (storeEdit?.country === 'kr' ? 'naver' : 'google')) === k;
                 return (
-                  <TouchableOpacity key={k} style={[styles.mapSegBtn, on && styles.mapSegOn]} onPress={() => setStoreEdit(s => ({ ...s, provider: k }))} activeOpacity={0.85}>
+                  <TouchableOpacity key={k} style={[styles.mapSegBtn, on && styles.mapSegOn]} onPress={() => {
+                    setStoreEdit(s => ({ ...s, provider: k }));
+                    const v = (storeEdit?.val || '').trim();
+                    if (v) openUrl(spotMapUrl(v, storeEdit?.country, { provider: k, ...(storeEdit?.place || {}) }));
+                  }} activeOpacity={0.85}>
                     <Ionicons name="map-outline" size={14} color={on ? C.roseDeep : C.muted} />
                     <Text style={[styles.mapSegTxt, on && styles.mapSegTxtOn]}>{label}</Text>
+                    <Ionicons name="open-outline" size={12} color={on ? C.roseDeep : C.muted} />
                   </TouchableOpacity>
                 );
               })}
