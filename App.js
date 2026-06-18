@@ -918,7 +918,7 @@ export default function App() {
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               {popGroups.map(g => {
-                const bgs = groupByBrand(g.list);
+                const bgs = groupByBrand(g.list).sort((a, b) => (a.brand || a.items[0]?.zh || '').localeCompare(b.brand || b.items[0]?.zh || '', 'en'));
                 return (
                   <View key={g.c} style={{ marginBottom: 16 }}>
                     <Text style={styles.popCat}>{g.e} {g.c}</Text>
@@ -938,15 +938,18 @@ export default function App() {
                             </TouchableOpacity>
                             {open && (
                               <View style={styles.brandRowExpand}>
+                                <View style={styles.brandExpandTop}>
+                                  <Text style={styles.brandExpandBrand}>{bg.brand}</Text>
+                                  <TouchableOpacity onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent(bg.brand + ' 熱門 推薦')}`)} hitSlop={6} activeOpacity={0.7}><Text style={styles.brandMore}>了解更多 ›</Text></TouchableOpacity>
+                                </View>
                                 <View style={styles.popWrap}>
                                   {bg.items.map(p => (
-                                    <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`查看 ${p.zh}`}>
+                                    <TouchableOpacity key={p.zh} style={styles.popChipLite} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`查看 ${p.zh}`}>
                                       <Text style={styles.popChipTxt}>{stripBrand(p.zh, bg.brand)}</Text>
                                       <Ionicons name="add" size={14} color={C.roseDeep} />
                                     </TouchableOpacity>
                                   ))}
                                 </View>
-                                <TouchableOpacity onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent(bg.brand + ' 熱門 推薦')}`)} hitSlop={6} activeOpacity={0.7} style={{ alignSelf: 'flex-end', marginTop: 8 }}><Text style={styles.brandMore}>了解更多 ›</Text></TouchableOpacity>
                               </View>
                             )}
                           </View>
@@ -1204,7 +1207,6 @@ const styles = StyleSheet.create({
   popCat: { color: C.inkSoft, fontSize: 13, fontWeight: '800', marginBottom: 10 },
   brandMore: { color: C.muted, fontSize: 11.5, fontWeight: '700' },
   popWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  popChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.roseSoft, borderRadius: 999, paddingLeft: 14, paddingRight: 10, paddingVertical: 9 },
   popChipTxt: { color: C.roseDeep, fontSize: 13.5, fontWeight: '700' },
   // 品牌清單列（目錄式）
   brandList: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: C.line, overflow: 'hidden' },
@@ -1214,7 +1216,10 @@ const styles = StyleSheet.create({
   brandInitialTxt: { color: C.roseDeep, fontSize: 14, fontWeight: '900' },
   brandRowName: { flex: 1, color: C.ink, fontSize: 14.5, fontWeight: '700' },
   brandRowCount: { color: C.muted, fontSize: 12, fontWeight: '700' },
-  brandRowExpand: { backgroundColor: '#FBF3E4', paddingHorizontal: 13, paddingTop: 4, paddingBottom: 13 },
+  brandRowExpand: { backgroundColor: '#fff', paddingHorizontal: 13, paddingTop: 2, paddingBottom: 14 },
+  brandExpandTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  brandExpandBrand: { color: C.roseDeep, fontSize: 12.5, fontWeight: '900' },
+  popChipLite: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fff', borderWidth: 1, borderColor: C.roseSoft, borderRadius: 999, paddingLeft: 13, paddingRight: 9, paddingVertical: 9 },
   popHint: { color: C.muted, fontSize: 12, textAlign: 'center', marginTop: 2, marginBottom: 6 },
 
   list: { flex: 1, paddingHorizontal: 18, marginTop: 14 },
