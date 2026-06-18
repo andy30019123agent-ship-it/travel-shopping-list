@@ -1145,7 +1145,7 @@ export default function App() {
             <Text style={styles.sheetTitle}>本趟預算（台幣）</Text>
             <TextInput style={styles.storeInput} keyboardType="numeric" value={budgetEdit?.val} placeholder="例如 20000" placeholderTextColor="#cdbdb0" autoFocus onChangeText={t => setBudgetEdit(s => ({ ...s, val: t.replace(/[^0-9]/g, '') }))} />
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-              {budget > 0 && <TouchableOpacity style={[styles.storeSave, { flex: 0, paddingHorizontal: 16, backgroundColor: C.bg }]} onPress={() => { setBudget(0); setBudgetEdit(null); }}><Text style={[styles.storeSaveTxt, { color: C.inkSoft }]}>清除</Text></TouchableOpacity>}
+              {budget > 0 && <TouchableOpacity style={[styles.storeSave, { flexShrink: 0, paddingHorizontal: 22, backgroundColor: C.bg }]} onPress={() => { setBudget(0); setBudgetEdit(null); }}><Text style={[styles.storeSaveTxt, { color: C.inkSoft }]} numberOfLines={1}>清除</Text></TouchableOpacity>}
               <TouchableOpacity style={[styles.storeSave, { flex: 1 }]} onPress={() => { setBudget(parseInt(budgetEdit.val) || 0); setBudgetEdit(null); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
             </View>
           </View>
