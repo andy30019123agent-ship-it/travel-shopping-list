@@ -293,99 +293,271 @@ async function naverCandidates(env, terms) {
 const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>熱門商品後台</title>
+<script defer src="//unpkg.com/@alpinejs/sort@3.14.1/dist/cdn.min.js"></script>
+<script defer src="//unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
 <style>
- body{font-family:-apple-system,system-ui,sans-serif;margin:0;background:#F6F0EA;color:#2E2420}
- header{background:#E0567C;color:#fff;padding:14px 16px;font-weight:800;font-size:17px;position:sticky;top:0;z-index:9}
- .wrap{padding:14px;max-width:720px;margin:0 auto}
- input{font:inherit;padding:8px 10px;border:1px solid #ECE1D8;border-radius:8px;width:100%;box-sizing:border-box;background:#fff}
- .tok{display:flex;gap:8px;margin-bottom:12px}
+ *{box-sizing:border-box}
+ body{font-family:-apple-system,system-ui,'PingFang TC',sans-serif;margin:0;background:#F6F0EA;color:#2E2420;-webkit-text-size-adjust:100%}
+ header{background:#E0567C;color:#fff;padding:13px 16px;font-weight:800;font-size:16px;position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;align-items:center}
+ .wrap{padding:13px;max-width:760px;margin:0 auto}
+ input,select,textarea{font:inherit;padding:8px 10px;border:1.5px solid #ECE1D8;border-radius:9px;width:100%;background:#fff;color:#2E2420}
+ input:focus,select:focus,textarea:focus{outline:none;border-color:#E0567C}
+ textarea{resize:vertical;min-height:46px;line-height:1.5}
+ button{font:inherit;font-weight:700;border:0;border-radius:9px;padding:8px 12px;background:#E0567C;color:#fff;cursor:pointer}
+ button.ghost{background:#fff;color:#7A6E66;border:1.5px solid #ECE1D8}
+ button.sm{padding:5px 10px;font-size:12.5px}
+ button:disabled{opacity:.5}
  .tabs{display:flex;gap:8px;margin:12px 0}
- .tab{flex:1;padding:10px;text-align:center;border-radius:10px;background:#fff;font-weight:700;border:1px solid #ECE1D8}
+ .tab{flex:1;padding:10px;text-align:center;border-radius:11px;background:#fff;font-weight:800;border:1.5px solid #ECE1D8;cursor:pointer}
  .tab.on{background:#E0567C;color:#fff;border-color:#E0567C}
- .item{background:#fff;border-radius:12px;padding:10px;margin-bottom:10px;border:1px solid #ECE1D8}
- .row{display:flex;gap:6px;margin-bottom:6px;align-items:center}
- .row label{width:48px;color:#A89C92;font-size:12px;flex:none}
- .btns{display:flex;gap:6px;justify-content:flex-end}
- button{font:inherit;font-weight:700;border:0;border-radius:8px;padding:8px 12px;background:#E0567C;color:#fff}
- button.ghost{background:#fff;color:#7A6E66;border:1px solid #ECE1D8}
- button.sm{padding:4px 9px;font-size:13px}
- .cand{background:#FBF3E4;border-radius:10px;padding:8px 10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
- .save{position:sticky;bottom:0;background:#F6F0EA;padding:12px 0}
- .save button{width:100%;padding:14px;font-size:16px}
- h3{margin:18px 0 8px}
+ .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+ .bar .grow{flex:1;min-width:140px}
+ .brand{margin-bottom:12px;border:1.5px solid #ECE1D8;border-radius:14px;overflow:hidden;background:#fff}
+ .bhead{display:flex;align-items:center;gap:8px;padding:11px 13px;cursor:pointer;background:#fff;font-weight:800}
+ .binitial{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#E0567C,#C53E63);color:#fff;display:grid;place-items:center;font-size:13px;flex:none}
+ .bcount{color:#A89C92;font-size:12px;font-weight:700}
+ .bbody{padding:8px 11px 11px}
+ .item{background:#FBF7F2;border-radius:12px;padding:10px;margin-bottom:9px;border:1px solid #ECE1D8}
+ .ihead{display:flex;gap:10px}
+ .thumb{width:60px;height:60px;border-radius:9px;object-fit:cover;background:#EEE6DE;flex:none}
+ .thumb.none{display:grid;place-items:center;color:#C9251E;font-size:10px;font-weight:800;text-align:center;line-height:1.2;border:1.5px dashed #E7A6A2;background:#FCEEED}
+ .grip{cursor:grab;color:#C9BEB4;font-size:18px;padding:0 2px;user-select:none}
+ .field{margin-top:7px}
+ .field label{display:block;color:#A89C92;font-size:11px;font-weight:700;margin-bottom:2px}
+ .two{display:flex;gap:7px}.two>div{flex:1}
+ .iact{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+ .iact .spacer{flex:1}
+ .chk{width:18px;height:18px;accent-color:#E0567C}
+ .nobadge{display:inline-block;background:#FCEEED;color:#C9251E;font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;margin-left:6px}
+ .cand{background:#fff;border:1.5px solid #ECE1D8;border-radius:11px;padding:9px;margin-bottom:8px;display:flex;gap:9px;align-items:center}
+ .cand img{width:46px;height:46px;border-radius:8px;object-fit:cover;background:#EEE6DE;flex:none}
+ .dup{color:#3F9E6E;font-size:11px;font-weight:800}
+ h3{margin:20px 0 6px;font-size:15px}
  .muted{color:#A89C92;font-size:12px}
- img.th{width:42px;height:42px;border-radius:6px;object-fit:cover;background:#eee;float:right}
-</style></head><body>
-<header>🛍️ 熱門商品後台</header>
+ .save{position:sticky;bottom:0;background:linear-gradient(180deg,rgba(246,240,234,0),#F6F0EA 30%);padding:14px 0 16px;z-index:10}
+ .save button{width:100%;padding:14px;font-size:16px}
+ .toast{position:fixed;left:50%;bottom:78px;transform:translateX(-50%);background:#2E2420;color:#fff;padding:10px 16px;border-radius:999px;font-weight:700;font-size:13px;z-index:50;display:flex;gap:12px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+ .toast button{background:none;color:#FCA5C0;padding:0}
+ .ov{position:fixed;inset:0;background:rgba(46,36,32,.5);z-index:40;display:flex;align-items:center;justify-content:center;padding:18px}
+ .card{background:#fff;border-radius:18px;padding:18px;max-width:380px;width:100%;max-height:86vh;overflow:auto}
+ .pv-kick{color:#C53E63;font-size:12px;font-weight:800;letter-spacing:.05em}
+ .pv-name{font-size:20px;font-weight:900;margin:2px 0 10px}
+ .pv-lab{color:#A89C92;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;margin-top:8px}
+ .pv-info{font-size:14px;line-height:1.55;margin-top:3px}
+ .pv-claim{background:#FCE7EE;border-radius:13px;padding:13px;margin-top:12px}
+ .pv-claim .l{color:#C53E63;font-weight:800;font-size:12.5px}
+ .pv-claim .t{font-size:13.5px;line-height:1.55;margin-top:5px}
+ .pv-note{display:flex;gap:6px;align-items:center;color:#BE8A3C;font-size:11.5px;margin-top:8px}
+ .pv-ban{background:#FCF3E0;border-left:3px solid #BE8A3C;border-radius:8px;padding:9px 11px;color:#8a6a2a;font-size:12px;margin-top:12px}
+ .pvimg{width:100%;height:150px;object-fit:contain;background:#FBF7F2;border-radius:12px;margin-bottom:10px}
+ [x-cloak]{display:none!important}
+</style></head><body x-data="admin()" x-init="init()" x-cloak>
+<header><span>🛍️ 熱門商品後台</span><span class="muted" style="color:#fff;opacity:.8;font-size:12px" x-show="loggedIn" x-text="dirty?'● 有未存變更':'已同步'"></span></header>
 <div class="wrap">
- <div class="tok"><input id="tok" placeholder="輸入管理密碼" type="password"><button onclick="load()">登入</button></div>
- <div id="app" style="display:none">
-  <div class="tabs"><div class="tab on" id="t-jp" onclick="sw('jp')">🇯🇵 日本</div><div class="tab" id="t-kr" onclick="sw('kr')">🇰🇷 韓國</div></div>
-  <button class="ghost sm" onclick="add()">＋ 新增一筆</button>
-  <button class="sm" onclick="addBrand(this)">＋ 新增品牌(自動找品項)</button>
-  <div id="list"></div>
-  <h3>🤖 自動候選池 <span class="muted" id="candtime"></span></h3>
-  <div class="muted">每週自動更新，點「加入」放進上方發布清單</div>
-  <div id="cands"></div>
-  <div class="save"><button onclick="save()">儲存發布清單</button></div>
+
+ <div x-show="!loggedIn">
+  <div class="bar"><input class="grow" type="password" placeholder="輸入管理密碼" x-model="token" @keydown.enter="login()"><button @click="login()">登入</button></div>
+  <p class="muted" x-text="err"></p>
+ </div>
+
+ <div x-show="loggedIn">
+  <div class="tabs">
+   <div class="tab" :class="cur=='jp'&&'on'" @click="cur='jp'">🇯🇵 日本 (<span x-text="data.published.jp.length"></span>)</div>
+   <div class="tab" :class="cur=='kr'&&'on'" @click="cur='kr'">🇰🇷 韓國 (<span x-text="data.published.kr.length"></span>)</div>
+  </div>
+
+  <div class="bar">
+   <input class="grow" placeholder="🔍 搜尋品牌/品名/關鍵字" x-model="q">
+   <button class="ghost sm" @click="expandAll(true)">全展開</button>
+   <button class="ghost sm" @click="expandAll(false)">全收合</button>
+  </div>
+  <div class="bar">
+   <button class="sm" @click="addEmpty()">＋ 空白筆</button>
+   <button class="sm" @click="addAiOne()">✨ AI 新增單品</button>
+   <button class="sm" @click="addBrandAuto()">🏷️ 新增品牌(自動找)</button>
+   <button class="ghost sm" @click="enrichAll()">🔄 整批補圖文</button>
+  </div>
+  <div class="bar" x-show="selCount()>0">
+   <span class="muted">已選 <span x-text="selCount()"></span> 筆</span>
+   <button class="ghost sm" @click="delSelected()">🗑️ 刪除選取</button>
+   <button class="ghost sm" @click="sel={}">取消選取</button>
+  </div>
+
+  <template x-for="g in groups()" :key="g.brand">
+   <div class="brand">
+    <div class="bhead" @click="toggle(g.brand)">
+     <div class="binitial" x-text="initial(g.brand)"></div>
+     <span x-text="g.brand"></span><span class="bcount" x-text="'· '+g.items.length+' 項'"></span>
+     <span class="spacer" style="flex:1"></span>
+     <span x-text="expand[g.brand]?'▾':'▸'"></span>
+    </div>
+    <div class="bbody" x-show="expand[g.brand]">
+     <div x-sort="(id,pos)=>moveInGroup(g.brand,id,pos)" x-sort:config="{ handle: '.grip' }">
+      <template x-for="it in g.items" :key="it._id">
+       <div class="item" x-sort:item="it._id">
+        <div class="ihead">
+         <span class="grip">⠿</span>
+         <template x-if="it.image"><img class="thumb" :src="it.image" @error="$el.style.opacity=.3"></template>
+         <template x-if="!it.image"><div class="thumb none">沒圖<br>App不顯示</div></template>
+         <div style="flex:1">
+          <div class="two">
+           <div><label>品牌</label><input x-model="it.brand" placeholder="numbuzin"></div>
+           <div><label>分類</label><select x-model="it.c"><option value="">—</option><template x-for="o in cats" :key="o"><option :value="o" x-text="o"></option></template></select></div>
+          </div>
+          <div class="field"><label>中文品名</label><input x-model="it.zh" placeholder="品牌+具體品項"></div>
+         </div>
+        </div>
+        <div class="two field">
+         <div><label>當地搜尋關鍵字</label><input x-model="it.term"></div>
+         <div style="flex:none;width:70px"><label>圖示</label><select x-model="it.e"><template x-for="o in emos" :key="o"><option :value="o" x-text="o"></option></template></select></div>
+        </div>
+        <div class="field"><label>圖網址</label><input x-model="it.image" placeholder="https://…"></div>
+        <div class="field"><label>簡介（關於這個）</label><textarea x-model="it.info"></textarea></div>
+        <div class="field"><label>主打效果</label><textarea x-model="it.claim"></textarea></div>
+        <div class="iact">
+         <input type="checkbox" class="chk" :checked="sel[it._id]" @change="sel[it._id]=!sel[it._id]">
+         <button class="ghost sm" @click="refreshImg(it)" :disabled="it._busy">🖼️ 重抓圖</button>
+         <button class="ghost sm" @click="regen(it)" :disabled="it._busy">✨ AI文案</button>
+         <button class="ghost sm" @click="preview(it)">👁️ 預覽</button>
+         <span class="spacer"></span>
+         <button class="ghost sm" @click="delItem(it)">刪除</button>
+        </div>
+       </div>
+      </template>
+     </div>
+    </div>
+   </div>
+  </template>
+  <p class="muted" x-show="groups().length==0">沒有符合的品項</p>
+
+  <h3>🤖 自動候選池 <span class="muted" x-text="data.candidates.updatedAt?('更新於 '+data.candidates.updatedAt):''"></span></h3>
+  <div class="bar"><span class="muted">每週自動更新，挑進上方發布清單</span><button class="ghost sm" x-show="cands().length" @click="addAllCands()">全部加入</button></div>
+  <template x-for="(c,ci) in cands()" :key="ci">
+   <div class="cand">
+    <template x-if="c.image"><img :src="c.image"></template>
+    <div style="flex:1">
+     <div><span x-text="c.e||'🛍️'"></span> <b x-text="c.zh"></b> <span class="dup" x-show="isDup(c)">✓已在清單</span></div>
+     <div class="muted" x-text="(c.c||'')+' · '+(c.term||'')"></div>
+    </div>
+    <button class="sm" @click="addCand(c)" x-show="!isDup(c)">加入</button>
+    <button class="ghost sm" @click="skipCand(ci)">略過</button>
+   </div>
+  </template>
+
+  <div class="save"><button @click="save()" :disabled="saving" x-text="saving?'儲存中…':'儲存發布清單'"></button></div>
  </div>
 </div>
+
+<div class="toast" x-show="toast" x-transition style="display:none">
+ <span x-text="toast"></span>
+ <button x-show="undoBuf" @click="undo()">復原</button>
+</div>
+
+<div class="ov" x-show="pv" @click.self="pv=null" style="display:none">
+ <div class="card" x-show="pv">
+  <template x-if="pv&&pv.image"><img class="pvimg" :src="pv.image"></template>
+  <div class="pv-kick" x-text="pv&&pv.brand"></div>
+  <div class="pv-name" x-text="pv&&(stripBrand(pv.zh,pv.brand))"></div>
+  <template x-if="pv&&(pv.info||pv.d)"><div><div class="pv-lab">關於這個</div><div class="pv-info" x-text="pv&&(pv.info||pv.d)"></div></div></template>
+  <template x-if="pv&&pv.claim"><div class="pv-claim"><div class="l">✨ 主打效果（廠商宣稱／社群分享）</div><div class="t" x-text="pv.claim"></div><div class="pv-note">⚠️ 以上為產品宣傳說法，效果因人而異</div></div></template>
+  <div class="pv-ban">ⓘ 商品資訊僅供參考，不作為購物建議</div>
+  <button style="width:100%;margin-top:14px" @click="pv=null">關閉</button>
+ </div>
+</div>
+
 <script>
-var TOKEN='',DATA={published:{jp:[],kr:[]},candidates:{jp:[],kr:[]}},CUR='jp';
-function el(t,a,h){var e=document.createElement(t);if(a)for(var k in a)e.setAttribute(k,a[k]);if(h!=null)e.innerHTML=h;return e}
-function load(){
- TOKEN=document.getElementById('tok').value.trim();if(!TOKEN)return;
- fetch('/admin/data?token='+encodeURIComponent(TOKEN)).then(function(r){return r.json()}).then(function(d){
-  if(!d.ok){alert('密碼錯誤');return}
-  DATA.published=d.published||{jp:[],kr:[]};DATA.candidates=d.candidates||{jp:[],kr:[]};
-  if(!DATA.published.jp)DATA.published.jp=[];if(!DATA.published.kr)DATA.published.kr=[];
-  localStorage.setItem('oytok',TOKEN);
-  document.getElementById('app').style.display='block';render();
- }).catch(function(){alert('連線失敗')});
-}
-function sw(c){CUR=c;document.getElementById('t-jp').className='tab'+(c=='jp'?' on':'');document.getElementById('t-kr').className='tab'+(c=='kr'?' on':'');render()}
-function fld(it,key,ph){var i=el('input');i.value=it[key]||'';i.placeholder=ph;i.oninput=function(){it[key]=i.value};var r=el('div',{class:'row'});r.appendChild(el('label',null,ph));r.appendChild(i);return r}
-function render(){
- var list=document.getElementById('list');list.innerHTML='';
- var arr=DATA.published[CUR]||[];
- arr.forEach(function(it,i){
-  var box=el('div',{class:'item'});
-  if(it.image)box.appendChild(el('img',{class:'th',src:it.image}));
-  box.appendChild(fld(it,'brand','品牌'));box.appendChild(fld(it,'zh','名稱'));box.appendChild(fld(it,'term','關鍵字'));
-  box.appendChild(fld(it,'c','分類'));box.appendChild(fld(it,'e','圖示'));
-  box.appendChild(fld(it,'d','簡介'));box.appendChild(fld(it,'image','圖網址'));
-  var b=el('div',{class:'btns'});
-  var up=el('button',{class:'ghost sm'},'↑');up.onclick=function(){if(i>0){arr.splice(i-1,0,arr.splice(i,1)[0]);render()}};
-  var dn=el('button',{class:'ghost sm'},'↓');dn.onclick=function(){if(i<arr.length-1){arr.splice(i+1,0,arr.splice(i,1)[0]);render()}};
-  var del=el('button',{class:'ghost sm'},'刪除');del.onclick=function(){if(confirm('刪除這筆？')){arr.splice(i,1);render()}};
-  b.appendChild(up);b.appendChild(dn);b.appendChild(del);box.appendChild(b);list.appendChild(box);
- });
- var cands=document.getElementById('cands');cands.innerHTML='';
- (DATA.candidates[CUR]||[]).forEach(function(it){
-  var c=el('div',{class:'cand'});
-  c.appendChild(el('div',null,(it.e||'')+' <b>'+(it.zh||'')+'</b><br><span class="muted">'+(it.c||'')+' · '+(it.term||'')+'</span>'));
-  var a=el('button',{class:'sm'},'加入');a.onclick=function(){DATA.published[CUR].push(JSON.parse(JSON.stringify(it)));sw(CUR)};
-  c.appendChild(a);cands.appendChild(c);
- });
- document.getElementById('candtime').textContent=DATA.candidates.updatedAt?('更新於 '+DATA.candidates.updatedAt):'';
-}
-function add(){DATA.published[CUR].push({brand:'',zh:'',term:'',c:'',e:'🛍️',d:'',image:''});render()}
-function addBrand(btn){
- var b=prompt('輸入品牌名稱（例 numbuzin、DHC、Anua）：');if(!b)return;
- var o=btn.textContent;btn.textContent='搜尋中…';btn.disabled=true;
- fetch('/admin/brandfill?token='+encodeURIComponent(TOKEN)+'&country='+CUR+'&brand='+encodeURIComponent(b)).then(function(r){return r.json()}).then(function(d){
-  btn.textContent=o;btn.disabled=false;
-  if(!d.ok){alert('失敗');return}
-  if(!d.items||!d.items.length){alert('找不到該品牌的熱門品項（可能查無圖）');return}
-  DATA.published[CUR]=DATA.published[CUR].concat(d.items);render();
-  alert('已加入 '+d.items.length+' 個「'+b+'」品項，記得按下方「儲存發布清單」');
- }).catch(function(){btn.textContent=o;btn.disabled=false;alert('連線失敗')});
-}
-function save(){
- fetch('/admin/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,jp:DATA.published.jp,kr:DATA.published.kr})})
- .then(function(r){return r.json()}).then(function(d){alert(d.ok?'已儲存 ✅ App 重新整理即生效':'儲存失敗')}).catch(function(){alert('連線失敗')});
-}
-var saved=localStorage.getItem('oytok');if(saved){document.getElementById('tok').value=saved;load()}
+function admin(){return{
+ token:'',loggedIn:false,err:'',cur:'jp',q:'',
+ data:{published:{jp:[],kr:[]},candidates:{jp:[],kr:[]}},
+ expand:{},sel:{},pv:null,toast:'',undoBuf:null,saving:false,dirty:false,uid:1,_tt:null,_dt:null,
+ cats:['美妝・保養','藥妝・保健','零食・食品','生活雜貨'],
+ emos:['💄','💊','🍫','🧴','🍜','🍵','🧷','🛍️'],
+ init(){var s=this;var t=localStorage.getItem('oytok');if(t){this.token=t;this.login(true)}
+  window.addEventListener('beforeunload',function(e){if(s.dirty){e.preventDefault();e.returnValue=''}})},
+ api(p){return fetch(p+(p.indexOf('?')<0?'?':'&')+'token='+encodeURIComponent(this.token))},
+ tag(arr){var s=this;(arr||[]).forEach(function(it){if(!it._id)it._id=s.uid++})},
+ login(silent){var s=this;if(!this.token)return;
+  fetch('/admin/data?token='+encodeURIComponent(this.token)).then(function(r){return r.json()}).then(function(d){
+   if(!d.ok){s.err='密碼錯誤';if(!silent)alert('密碼錯誤');return}
+   s.data.published=d.published||{jp:[],kr:[]};s.data.candidates=d.candidates||{jp:[],kr:[]};
+   if(!s.data.published.jp)s.data.published.jp=[];if(!s.data.published.kr)s.data.published.kr=[];
+   s.tag(s.data.published.jp);s.tag(s.data.published.kr);
+   localStorage.setItem('oytok',s.token);s.loggedIn=true;s.err='';
+   var dr=localStorage.getItem('oydraft');
+   if(dr){try{var pd=JSON.parse(dr);if(confirm('發現上次未儲存的草稿，要還原嗎？(取消＝用伺服器最新版)')){s.data.published=pd;s.tag(s.data.published.jp||[]);s.tag(s.data.published.kr||[])}else localStorage.removeItem('oydraft')}catch(e){}}
+   s.$watch('data.published',function(){s.dirty=true;clearTimeout(s._dt);s._dt=setTimeout(function(){try{localStorage.setItem('oydraft',JSON.stringify(s.data.published))}catch(e){}},800)});
+  }).catch(function(){s.err='連線失敗';if(!silent)alert('連線失敗')});
+ },
+ list(){return this.data.published[this.cur]||[]},
+ brandOf(it){return (it.brand||'').trim()||'其他'},
+ initial(b){var c=(b||'').trim().charAt(0).toUpperCase();return c||'#'},
+ groups(){var s=this,q=this.q.trim().toLowerCase(),m={};
+  this.list().forEach(function(it){
+   if(q&&((it.zh||'')+(it.brand||'')+(it.term||'')).toLowerCase().indexOf(q)<0)return;
+   var b=s.brandOf(it);(m[b]=m[b]||[]).push(it);
+  });
+  return Object.keys(m).sort(function(a,b){if(a=='其他')return 1;if(b=='其他')return -1;return a.localeCompare(b,'en')}).map(function(b){return{brand:b,items:m[b]}});
+ },
+ toggle(b){this.expand[b]=!this.expand[b]},
+ expandAll(v){var s=this;this.groups().forEach(function(g){s.expand[g.brand]=v})},
+ moveInGroup(brand,id,pos){var arr=this.list();var item=arr.find(function(x){return x._id==id});if(!item)return;
+  arr.splice(arr.indexOf(item),1);
+  var gi=[];arr.forEach(function(x,i){if(this.brandOf(x)==brand)gi.push(i)},this);
+  var at=pos>=gi.length?(gi.length?gi[gi.length-1]+1:arr.length):gi[pos];
+  arr.splice(at,0,item);this.dirty=true;
+ },
+ addEmpty(){var it={_id:this.uid++,brand:'',zh:'',term:'',c:'',e:'🛍️',info:'',claim:'',d:'',image:''};this.list().unshift(it);this.expand[this.brandOf(it)]=true},
+ addAiOne(){var s=this;var name=prompt('輸入「品牌 品名」（例：numbuzin 5號精華）：');if(!name)return;
+  var brand=prompt('品牌名（可留空，會歸到品名首字）：')||'';
+  s.toast='AI 產生中…';
+  s.api('/admin/aifill?country='+s.cur+'&brand='+encodeURIComponent(brand)+'&name='+encodeURIComponent(name)).then(function(r){return r.json()}).then(function(d){
+   s.toast='';if(!d.ok){alert('失敗：'+(d.error||''));return}
+   var it=Object.assign({_id:s.uid++,brand:brand,zh:name,d:''},d.item);s.list().unshift(it);s.expand[s.brandOf(it)]=true;s.dirty=true;s.flash('已新增，記得儲存');
+  }).catch(function(){s.toast='';alert('連線失敗')});
+ },
+ addBrandAuto(){var s=this;var b=prompt('輸入品牌（例 numbuzin、DHC、Anua），自動找熱門品項：');if(!b)return;
+  s.toast='搜尋「'+b+'」中…';
+  s.api('/admin/brandfill?country='+s.cur+'&brand='+encodeURIComponent(b)).then(function(r){return r.json()}).then(function(d){
+   s.toast='';if(!d.ok||!d.items||!d.items.length){alert('找不到該品牌熱門品項');return}
+   d.items.forEach(function(it){it._id=s.uid++;it.d=it.info||it.d||'';s.list().push(it)});s.expand[b]=true;s.dirty=true;s.flash('已加入 '+d.items.length+' 個「'+b+'」品項');
+  }).catch(function(){s.toast='';alert('連線失敗')});
+ },
+ refreshImg(it){var s=this;if(!it.term){alert('先填關鍵字');return}it._busy=true;
+  s.api('/admin/refreshimg?country='+s.cur+'&term='+encodeURIComponent(it.term)).then(function(r){return r.json()}).then(function(d){
+   it._busy=false;if(d.ok&&d.image){it.image=d.image;s.dirty=true;s.flash('已換圖')}else alert('沒抓到圖');
+  }).catch(function(){it._busy=false;alert('連線失敗')});
+ },
+ regen(it){var s=this;if(!it.zh){alert('先填中文品名');return}it._busy=true;
+  s.api('/admin/aifill?country='+s.cur+'&brand='+encodeURIComponent(it.brand||'')+'&name='+encodeURIComponent(it.zh)+'&noimg=1').then(function(r){return r.json()}).then(function(d){
+   it._busy=false;if(!d.ok){alert('失敗');return}
+   if(d.item.term)it.term=d.item.term;if(d.item.c)it.c=d.item.c;if(d.item.e)it.e=d.item.e;it.info=d.item.info;it.claim=d.item.claim;s.dirty=true;s.flash('文案已更新');
+  }).catch(function(){it._busy=false;alert('連線失敗')});
+ },
+ enrichAll(){var s=this;if(!confirm('整批重新補圖與文案？沒圖的會被剔除，需數十秒。'))return;s.toast='整批補圖文中…(請稍候)';
+  s.api('/admin/enrich?country='+s.cur+'&retext=1').then(function(r){return r.json()}).then(function(d){
+   s.toast='';if(!d.ok){alert('失敗');return}if(d.published&&d.published[s.cur]){s.data.published[s.cur]=d.published[s.cur];s.tag(s.data.published[s.cur])}s.flash('整批補完成');
+  }).catch(function(){s.toast='';alert('連線失敗')});
+ },
+ delItem(it){var arr=this.list();var i=arr.indexOf(it);if(i<0)return;this.undoBuf={arr:this.cur,i:i,it:it};arr.splice(i,1);this.dirty=true;this.flash('已刪除 '+(it.zh||'一筆'))},
+ undo(){if(!this.undoBuf)return;this.data.published[this.undoBuf.arr].splice(this.undoBuf.i,0,this.undoBuf.it);this.undoBuf=null;this.toast=''},
+ selCount(){var n=0;for(var k in this.sel)if(this.sel[k])n++;return n},
+ delSelected(){var s=this;if(!confirm('刪除選取的 '+this.selCount()+' 筆？'))return;
+  this.data.published[this.cur]=this.list().filter(function(it){return !s.sel[it._id]});this.sel={};this.dirty=true;this.flash('已刪除選取')},
+ preview(it){this.pv=it},
+ stripBrand(zh,brand){zh=zh||'';brand=(brand||'').trim();if(!brand)return zh;var r=zh;[brand,brand.toUpperCase(),brand.toLowerCase()].forEach(function(b){if(b&&r.indexOf(b)==0)r=r.slice(b.length).replace(/^[\\s·・-]+/,'')});return r||zh},
+ cands(){return this.data.candidates[this.cur]||[]},
+ isDup(c){return this.list().some(function(it){return (it.zh||'')==(c.zh||'')})},
+ addCand(c){var it=JSON.parse(JSON.stringify(c));it._id=this.uid++;it.d=it.info||it.d||'';this.list().push(it);this.expand[this.brandOf(it)]=true;this.dirty=true;this.flash('已加入 '+(c.zh||''))},
+ addAllCands(){var s=this;this.cands().forEach(function(c){if(!s.isDup(c))s.addCand(c)})},
+ skipCand(ci){this.cands().splice(ci,1)},
+ flash(m){var s=this;this.toast=m;clearTimeout(this._tt);this._tt=setTimeout(function(){if(!s.undoBuf||s.toast==m)s.toast=''},4000)},
+ save(){var s=this;this.saving=true;
+  this.list().forEach(function(it){it.d=it.info||it.d||''});
+  var clean=function(a){return (a||[]).map(function(it){var o={};for(var k in it)if(k.charAt(0)!='_')o[k]=it[k];return o})};
+  fetch('/admin/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:this.token,jp:clean(this.data.published.jp),kr:clean(this.data.published.kr)})})
+  .then(function(r){return r.json()}).then(function(d){s.saving=false;if(d.ok){s.dirty=false;try{localStorage.removeItem('oydraft')}catch(e){}s.flash('已儲存 ✅ App 重新整理即生效')}else alert('儲存失敗')}).catch(function(){s.saving=false;alert('連線失敗')});
+ },
+}}
 </script></body></html>`;
 
 // ---- 熱門清單 (KV) ----
@@ -510,6 +682,21 @@ async function brandProducts(env, country, brand) {
   }
   return items;
 }
+// 後台：單一商品 AI 補欄位（新增/重產文案共用）→ {term,c,e,info,claim,d,image}
+async function aiFillOne(env, country, brand, name, withImage = true) {
+  const region = country === 'kr' ? '韓國' : '日本';
+  const langWord = country === 'kr' ? '韓文' : '日文';
+  const prompt = `商品「${brand ? brand + ' ' : ''}${name}」（${region}）。只回 JSON 物件：` +
+    `{"term":"當地${langWord}搜尋關鍵字(品牌+品項)","c":"分類(美妝・保養 / 藥妝・保健 / 零食・食品 三選一)","e":"分類emoji(💄/💊/🍫)",` +
+    `"info":"客觀說明這是什麼與主要用途約40字、不提產地","claim":"主打效果＋產品優勢與特色約120~150字：先點主打效果，再具體賣點/成分質地/適用情境，中性務實不浮誇、避免誇大療效"}。只回 JSON、不要 markdown。`;
+  const oa = await openaiChat(env, prompt, 1200, 'gpt-4o');
+  let o = {}; try { const m = (oa || '').match(/\{[\s\S]*\}/); o = m ? JSON.parse(m[0]) : {}; } catch {}
+  const term = (o.term || name).trim();
+  let image = '';
+  if (withImage) { try { image = country === 'kr' ? await naverImage(env, term) : ((await rakutenFirst(term))?.image || ''); } catch {} }
+  const info = (o.info || '').trim().slice(0, 100);
+  return { term, c: o.c || '', e: o.e || '🛍️', info, claim: (o.claim || '').trim().slice(0, 260), d: info, image };
+}
 // 把候選池整批發布成 published（再 enrich 補文案）
 async function publishCandidates(env, country) {
   const cand = await kvGetJSON(env, KV_CANDIDATES, { jp: [], kr: [] });
@@ -620,6 +807,27 @@ export default {
       const brand = (url.searchParams.get('brand') || '').trim();
       if (!brand) return json({ ok: false, error: 'missing brand' }, 400);
       return json({ ok: true, items: await brandProducts(env, c, brand) });
+    }
+    // 後台：單品 AI 補欄位（新增/重產文案）→ 回 {term,c,e,info,claim,d,image}
+    if (url.pathname === '/admin/aifill') {
+      if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
+      const c = url.searchParams.get('country') === 'jp' ? 'jp' : 'kr';
+      const brand = (url.searchParams.get('brand') || '').trim();
+      const name = (url.searchParams.get('name') || '').trim();
+      const withImage = url.searchParams.get('noimg') !== '1';
+      if (!name) return json({ ok: false, error: 'missing name' }, 400);
+      try { return json({ ok: true, item: await aiFillOne(env, c, brand, name, withImage) }); }
+      catch (e) { return json({ ok: false, error: String(e).slice(0, 120) }); }
+    }
+    // 後台：單品重抓圖（智慧選圖）→ 回 {image}
+    if (url.pathname === '/admin/refreshimg') {
+      if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
+      const c = url.searchParams.get('country') === 'jp' ? 'jp' : 'kr';
+      const term = (url.searchParams.get('term') || '').trim();
+      if (!term) return json({ ok: false, error: 'missing term' }, 400);
+      let image = '';
+      try { image = c === 'kr' ? await naverImage(env, term) : ((await rakutenFirst(term))?.image || ''); } catch {}
+      return json({ ok: true, image });
     }
     // 一鍵把候選池發布成 published（並補文案）
     if (url.pathname === '/admin/publish') {
