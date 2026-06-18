@@ -312,12 +312,15 @@ export default function App() {
   useEffect(() => { fetch(`${WORKER_URL}/popular`).then(r => r.json()).then(d => { if (d.ok) setRemotePopular({ jp: d.jp || [], kr: d.kr || [] }); }).catch(() => {}); }, []);
   // picker 開啟時，把候選標題批次翻成繁中（一次一個 AI 呼叫）
   useEffect(() => {
-    if (!picker || picker.trans || !(picker.candidates && picker.candidates.length)) return;
+    if (!picker || !(picker.candidates && picker.candidates.length) || picker.translating) return;
+    if (picker.trans && picker.trans[picker.candidates[0].title]) return; // 已翻譯（含重搜後新候選）
     const titles = picker.candidates.map(c => c.title);
+    setPicker(p => p ? { ...p, translating: true } : p);
     fetch(`${WORKER_URL}/translate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ titles }) })
       .then(r => r.json()).then(d => {
-        if (d.ok && Array.isArray(d.zh)) { const map = {}; titles.forEach((t, i) => { if (d.zh[i]) map[t] = d.zh[i]; }); setPicker(p => p ? { ...p, trans: map } : p); }
-      }).catch(() => {});
+        const map = {}; if (d.ok && Array.isArray(d.zh)) titles.forEach((t, i) => { if (d.zh[i]) map[t] = d.zh[i]; });
+        setPicker(p => p ? { ...p, trans: { ...(p.trans || {}), ...map }, translating: false } : p);
+      }).catch(() => setPicker(p => p ? { ...p, translating: false } : p));
   }, [picker]);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
   useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, budget, onboardSeen: !onboard, aiTipSeen })); }, [country, sort, stores, budget, onboard, aiTipSeen, settingsLoaded]);
@@ -890,7 +893,7 @@ export default function App() {
               {(picker?.candidates || []).map((c, i) => (
                 <TouchableOpacity key={i} style={styles.cand} onPress={() => choosePick(c)} activeOpacity={0.7}>
                   {c.image ? <TouchableOpacity onPress={() => setZoom({ url: c.image })} activeOpacity={0.8}><Image source={{ uri: c.image }} style={styles.candImg} /></TouchableOpacity> : <View style={styles.candImg} />}
-                  <View style={{ flex: 1 }}><Text style={styles.candTitle} numberOfLines={2}>{c.title}</Text>{picker.trans?.[c.title] ? <Text style={styles.candTrans} numberOfLines={1}>🔁 {picker.trans[c.title]}</Text> : null}<Text style={styles.candPrice}>{picker.currency}{fmt(c.price)}<Text style={styles.candTwd}>　NT${fmt(c.twd)}</Text></Text></View>
+                  <View style={{ flex: 1 }}><Text style={styles.candTitle} numberOfLines={2}>{c.title}</Text>{picker.trans?.[c.title] ? <Text style={styles.candTrans} numberOfLines={1}>🔁 {picker.trans[c.title]}</Text> : (picker.translating ? <Text style={styles.candTransLoading}>🔁 翻譯中…</Text> : null)}<Text style={styles.candPrice}>{picker.currency}{fmt(c.price)}<Text style={styles.candTwd}>　NT${fmt(c.twd)}</Text></Text></View>
                   <View style={styles.candPick}><Text style={styles.candPickTxt}>選</Text></View>
                 </TouchableOpacity>
               ))}
@@ -1332,6 +1335,7 @@ const styles = StyleSheet.create({
   candImg: { width: 56, height: 56, borderRadius: 12, backgroundColor: C.bg },
   candTitle: { color: C.ink, fontSize: 14, fontWeight: '600', lineHeight: 19 },
   candTrans: { color: C.roseDeep, fontSize: 12, marginTop: 2 },
+  candTransLoading: { color: C.muted, fontSize: 11.5, marginTop: 2, fontStyle: 'italic' },
   candPrice: { color: C.inkSoft, fontSize: 14, fontWeight: '700', marginTop: 4, fontFamily: MONO },
   candTwd: { color: C.rose, fontSize: 14, fontWeight: '800', fontFamily: MONO },
   candPick: { backgroundColor: C.roseSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },

@@ -11,14 +11,17 @@ const RAKUTEN_ACCESS_KEY = 'pk_SuWs3ZCwNcFZS14BLH8QbOcDkOOBMKlyDRp7L3a2ANN';
 // 取樂天該關鍵字第一筆商品的圖與價（worker 端帶 Referer 即可，實測可用）
 async function rakutenFirst(term) {
   const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
-    `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${encodeURIComponent(term)}&hits=3&format=json`;
+    `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${encodeURIComponent(term)}&hits=5&format=json`;
+  const NOISE = /福袋|セット|まとめ|詰め合わせ|ギフト|個セット|本セット|まとめ買い|選べる/;
   // 樂天有每秒限流，連續多筆會被擋→失敗重試一次
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await fetch(url, { headers: { Referer: RAKUTEN_REFERER, Origin: RAKUTEN_REFERER.replace(/\/$/, '') } });
       if (r.ok) {
         const j = await r.json();
-        const it = (j.Items || [])[0]?.Item || (j.Items || [])[0];
+        const items = (j.Items || []).map(x => x.Item || x).filter(Boolean);
+        // 智慧選：優先取「非套組/福袋」那筆，否則第一筆
+        const it = items.find(x => !NOISE.test(x.itemName || '')) || items[0];
         if (it) {
           const img = it.mediumImageUrls?.[0]?.imageUrl || it.mediumImageUrls?.[0] || it.imageUrl || '';
           if (img) return { image: img.replace(/\?_ex=\d+x\d+$/, ''), price: it.itemPrice || 0 };
@@ -354,6 +357,23 @@ async function kvGetJSON(env, key, fb) {
 }
 const okAdmin = (env, token) => env.ADMIN_TOKEN && token === env.ADMIN_TOKEN;
 
+// 智慧選圖：從 Naver 候選挑「標題最吻合品名、排除套組/福袋/N入」的那筆當縮圖
+const IMG_NOISE = /세트|기획|묶음|증정|사은품|대용량|벌크|박스|모음|기프트|[0-9]+\s*개|[0-9]+\s*매|[0-9]+\s*입|[+＋]|set/i;
+function pickImageCand(cands, term) {
+  if (!cands || !cands.length) return null;
+  const kws = (term || '').toLowerCase().split(/\s+/).filter(w => w.length >= 2);
+  const score = c => {
+    const t = (c.title || '').toLowerCase();
+    let s = kws.filter(k => t.includes(k)).length;
+    if (IMG_NOISE.test(c.title || '')) s -= 2;
+    if (c.image) s += 0.3;
+    return s;
+  };
+  let best = cands[0], bs = score(cands[0]);
+  for (const c of cands) { const s = score(c); if (s > bs) { bs = s; best = c; } }
+  return best;
+}
+const naverImage = async (env, term) => { try { return pickImageCand(await naverCandidates(env, [term]), term)?.image || ''; } catch { return ''; } };
 // 每週自動產生熱門候選：AI 出當期趨勢候選 → 平台驗證（KR 用 Naver 查得到貨＋補圖）→ 存候選池
 async function genCandidates(env, country) {
   const region = country === 'kr' ? '韓國' : '日本';
@@ -374,7 +394,7 @@ async function genCandidates(env, country) {
   for (const it of arr) {
     let image = '';
     try {
-      if (country === 'kr') { const c = await naverCandidates(env, [it.term]); image = c[0]?.image || ''; }
+      if (country === 'kr') { image = await naverImage(env, it.term); }
       else { const r = await rakutenFirst(it.term); image = r?.image || ''; }
     } catch {}
     if (!image) continue;
@@ -389,16 +409,15 @@ async function genCandidates(env, country) {
 async function enrichPublished(env, country) {
   const pub = await kvGetJSON(env, KV_PUBLISHED, { jp: [], kr: [] });
   const list = pub[country] || [];
-  // 補圖（不刪沒圖的，保留資料；App 端只顯示有圖者＝沒圖不上架）
+  // 重抓「智慧選圖」(排除套組/最吻合)，抓不到才保留舊圖；不刪沒圖者(App 端只顯示有圖)
   const kept = [];
   for (const it of list) {
-    let image = it.image || '';
-    if (!image) {
-      try {
-        if (country === 'kr') { const c = await naverCandidates(env, [it.term || it.zh]); image = c[0]?.image || ''; }
-        else { const r = await rakutenFirst(it.term || it.zh); image = r?.image || ''; }
-      } catch {}
-    }
+    let image = '';
+    try {
+      if (country === 'kr') { image = await naverImage(env, it.term || it.zh); }
+      else { const r = await rakutenFirst(it.term || it.zh); image = r?.image || ''; }
+    } catch {}
+    if (!image) image = it.image || '';
     kept.push({ ...it, image });
   }
   // AI 產三段文案（沒 info 的才補）；CJK 輸出量大，分批每 8 筆避免被 token 上限截斷
@@ -436,7 +455,7 @@ async function brandProducts(env, country, brand) {
   const items = [];
   for (const it of arr) {
     let image = '';
-    try { if (country === 'kr') { const c = await naverCandidates(env, [it.term]); image = c[0]?.image || ''; } else { const r = await rakutenFirst(it.term); image = r?.image || ''; } } catch {}
+    try { if (country === 'kr') { image = await naverImage(env, it.term); } else { const r = await rakutenFirst(it.term); image = r?.image || ''; } } catch {}
     if (!image) continue;
     items.push({ brand, zh: it.zh, term: it.term, c: it.c || '', e: it.e || '🛍️', image, info: '', claim: '', d: '' });
   }
