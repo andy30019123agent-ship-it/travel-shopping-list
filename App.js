@@ -145,13 +145,25 @@ const POPULAR = {
     ]},
   ],
 };
-function popularMatches(country, q) {
+// 邊打邊建議：從攤平清單比對
+function popularMatches(list, q) {
   const s = (q || '').trim().toLowerCase();
   if (!s) return [];
-  const out = [];
-  for (const g of (POPULAR[country] || [])) for (const it of g.list)
-    if (it.zh.toLowerCase().includes(s) || it.term.toLowerCase().includes(s)) out.push({ ...it, e: g.e });
-  return out.slice(0, 6);
+  return (list || []).filter(it => (it.zh || '').toLowerCase().includes(s) || (it.term || '').toLowerCase().includes(s)).slice(0, 6);
+}
+// 靜態熱門攤平成 {jp:[{zh,term,c,e,d,image}], kr:[...]}，當遠端清單的 fallback
+const STATIC_FLAT = { jp: [], kr: [] };
+for (const cc of ['jp', 'kr']) for (const g of (POPULAR[cc] || [])) for (const it of g.list)
+  STATIC_FLAT[cc].push({ zh: it.zh, term: it.term, c: g.c, e: g.e, d: it.d || '', image: '' });
+// 攤平清單依分類分組給面板渲染
+function groupFlat(arr) {
+  const groups = [], idx = {};
+  for (const it of (arr || [])) {
+    const c = it.c || '其他';
+    if (!(c in idx)) { idx[c] = groups.length; groups.push({ c, e: it.e || '🛍️', list: [] }); }
+    groups[idx[c]].list.push(it);
+  }
+  return groups;
 }
 
 // 樂天市場商品搜尋（單一賣場的商品列表）
@@ -272,7 +284,8 @@ export default function App() {
   const [aiTip, setAiTip] = useState(false); // 首次拍照提示彈窗
   const [aiTipSeen, setAiTipSeen] = useState(false); // 是否看過首次提示(存 settings)
   const [guide, setGuide] = useState(false); // 使用說明彈窗
-  const [popInfo, setPopInfo] = useState(null); // 熱門品介紹卡 {zh, term, d, e}
+  const [popInfo, setPopInfo] = useState(null); // 熱門品介紹卡 {zh, term, d, e, image}
+  const [remotePopular, setRemotePopular] = useState(null); // 從 worker 讀的發布熱門清單 {jp,kr}
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
   useFonts(Ionicons.font);
 
@@ -281,6 +294,7 @@ export default function App() {
     AsyncStorage.getItem(SETTINGS_KEY).then(r => { const s = r ? JSON.parse(r) : {}; if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.stores) setStores(s.stores); if (s.budget) setBudget(s.budget); if (s.aiTipSeen) setAiTipSeen(true); if (!s.onboardSeen) setOnboard(true); setSettingsLoaded(true); });
     fetch(`${WORKER_URL}/rate`).then(r => r.json()).then(d => { if (d.ok) setRates({ jpy: d.jpy, krw: d.krw }); }).catch(() => {});
   }, []);
+  useEffect(() => { fetch(`${WORKER_URL}/popular`).then(r => r.json()).then(d => { if (d.ok) setRemotePopular({ jp: d.jp || [], kr: d.kr || [] }); }).catch(() => {}); }, []);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
   useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, budget, onboardSeen: !onboard, aiTipSeen })); }, [country, sort, stores, budget, onboard, aiTipSeen, settingsLoaded]);
 
@@ -415,9 +429,19 @@ export default function App() {
   // 實際把熱門品加入清單並查價
   const addPopularItem = (p) => { const it = addItem(p.zh); if (it) { update(it.id, { term: p.term }); queryOne({ ...it, term: p.term }); } };
   // 熱門必買面板：點擊先跳介紹卡，再決定加入
-  const addPopular = (p) => setPopInfo(p);
+  // 熱門品點擊：先跳介紹卡；若沒圖就即時抓一張商品圖補上
+  const addPopular = (p) => {
+    setPopInfo(p);
+    if (!p.image) {
+      fetch(`${WORKER_URL}/price?item=${encodeURIComponent(p.term || p.zh)}&country=${country}`)
+        .then(r => r.json()).then(d => { const img = d.candidates?.[0]?.image; if (img) setPopInfo(cur => (cur && cur.zh === p.zh) ? { ...cur, image: img } : cur); }).catch(() => {});
+    }
+  };
   const confirmAddPopular = () => { const p = popInfo; setPopInfo(null); if (p) addPopularItem(p); };
-  const suggestions = useMemo(() => popularMatches(country, input), [input, country]);
+  // 熱門清單：優先用 worker 發布清單，沒有才退回內建靜態
+  const popList = useMemo(() => { const r = remotePopular?.[country]; return (r && r.length) ? r : STATIC_FLAT[country]; }, [remotePopular, country]);
+  const popGroups = useMemo(() => groupFlat(popList), [popList]);
+  const suggestions = useMemo(() => popularMatches(popList, input), [input, popList]);
 
   function completeItem(item) { update(item.id, { status: 'bought', store: item.store || '', boughtLocal: item.price ? item.price.price : 0 }); showToast(`已移到記帳：${item.name}`, () => update(item.id, { status: 'todo' })); }
   function unbuy(item) { update(item.id, { status: 'todo' }); }
@@ -755,7 +779,7 @@ export default function App() {
         <View style={styles.centerBackdrop}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setPopInfo(null)} />
           <View style={styles.storeModal}>
-            <Text style={styles.popInfoEmoji}>{popInfo?.e || '🛍️'}</Text>
+            {popInfo?.image ? <Image source={{ uri: popInfo.image }} style={styles.popInfoImg} resizeMode="contain" /> : <Text style={styles.popInfoEmoji}>{popInfo?.e || '🛍️'}</Text>}
             <Text style={styles.popInfoName}>{popInfo?.zh}</Text>
             {popInfo?.d ? <View style={styles.scanInfoBox}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.scanInfo}>{popInfo.d}</Text></View> : null}
             <Text style={styles.popInfoHint}>加入後會自動到當地比價、換算台幣 💰</Text>
@@ -830,7 +854,7 @@ export default function App() {
               <TouchableOpacity onPress={() => setShowPopular(false)} hitSlop={10}><Ionicons name="close" size={24} color={C.muted} /></TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
-              {(POPULAR[country] || []).map(g => (
+              {popGroups.map(g => (
                 <View key={g.c} style={{ marginBottom: 16 }}>
                   <Text style={styles.popCat}>{g.e} {g.c}</Text>
                   <View style={styles.popWrap}>
@@ -843,7 +867,7 @@ export default function App() {
                   </View>
                 </View>
               ))}
-              <Text style={styles.popHint}>點了會自動加入清單並查當地價，可重複點多個</Text>
+              <Text style={styles.popHint}>點一下會先看產品介紹，再決定要不要加入比價</Text>
             </ScrollView>
           </View>
         </View>
@@ -1173,6 +1197,7 @@ const styles = StyleSheet.create({
   scanReviewTxt: { color: C.inkSoft, fontWeight: '700', fontSize: 13 },
   scanDisclaim: { color: C.muted, fontSize: 10.5, textAlign: 'center', marginTop: 6 },
   popInfoEmoji: { fontSize: 34, textAlign: 'center' },
+  popInfoImg: { width: '100%', height: 150, borderRadius: 14, backgroundColor: C.bg },
   popInfoName: { fontSize: 18, fontWeight: '900', color: C.ink, textAlign: 'center', marginTop: 6 },
   popInfoHint: { color: C.muted, fontSize: 12, textAlign: 'center', marginTop: 10 },
   scanAskHint: { color: C.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },

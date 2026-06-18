@@ -5,3 +5,12 @@ compatibility_date = "2026-06-01"
 # Workers AI 綁定（用來把中文商品名翻成日文/韓文）
 [ai]
 binding = "AI"
+
+# 熱門商品清單儲存（發布清單 published / 候選池 candidates）
+[[kv_namespaces]]
+binding = "POPULAR_KV"
+id = "617c6c704fe0433287f4df24791751a5"
+
+# 每週自動更新熱門候選：週一 01:00 UTC = 台北週一 09:00
+[triggers]
+crons = ["0 1 * * 1"]

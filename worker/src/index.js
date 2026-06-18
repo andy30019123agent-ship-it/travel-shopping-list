@@ -217,6 +217,137 @@ async function naverCandidates(env, terms) {
   return out;
 }
 
+// ---- 後台管理頁（手機可用，密碼保護）----
+const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>熱門商品後台</title>
+<style>
+ body{font-family:-apple-system,system-ui,sans-serif;margin:0;background:#F6F0EA;color:#2E2420}
+ header{background:#E0567C;color:#fff;padding:14px 16px;font-weight:800;font-size:17px;position:sticky;top:0;z-index:9}
+ .wrap{padding:14px;max-width:720px;margin:0 auto}
+ input{font:inherit;padding:8px 10px;border:1px solid #ECE1D8;border-radius:8px;width:100%;box-sizing:border-box;background:#fff}
+ .tok{display:flex;gap:8px;margin-bottom:12px}
+ .tabs{display:flex;gap:8px;margin:12px 0}
+ .tab{flex:1;padding:10px;text-align:center;border-radius:10px;background:#fff;font-weight:700;border:1px solid #ECE1D8}
+ .tab.on{background:#E0567C;color:#fff;border-color:#E0567C}
+ .item{background:#fff;border-radius:12px;padding:10px;margin-bottom:10px;border:1px solid #ECE1D8}
+ .row{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+ .row label{width:48px;color:#A89C92;font-size:12px;flex:none}
+ .btns{display:flex;gap:6px;justify-content:flex-end}
+ button{font:inherit;font-weight:700;border:0;border-radius:8px;padding:8px 12px;background:#E0567C;color:#fff}
+ button.ghost{background:#fff;color:#7A6E66;border:1px solid #ECE1D8}
+ button.sm{padding:4px 9px;font-size:13px}
+ .cand{background:#FBF3E4;border-radius:10px;padding:8px 10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+ .save{position:sticky;bottom:0;background:#F6F0EA;padding:12px 0}
+ .save button{width:100%;padding:14px;font-size:16px}
+ h3{margin:18px 0 8px}
+ .muted{color:#A89C92;font-size:12px}
+ img.th{width:42px;height:42px;border-radius:6px;object-fit:cover;background:#eee;float:right}
+</style></head><body>
+<header>🛍️ 熱門商品後台</header>
+<div class="wrap">
+ <div class="tok"><input id="tok" placeholder="輸入管理密碼" type="password"><button onclick="load()">登入</button></div>
+ <div id="app" style="display:none">
+  <div class="tabs"><div class="tab on" id="t-jp" onclick="sw('jp')">🇯🇵 日本</div><div class="tab" id="t-kr" onclick="sw('kr')">🇰🇷 韓國</div></div>
+  <button class="ghost sm" onclick="add()">＋ 新增一筆</button>
+  <div id="list"></div>
+  <h3>🤖 自動候選池 <span class="muted" id="candtime"></span></h3>
+  <div class="muted">每週自動更新，點「加入」放進上方發布清單</div>
+  <div id="cands"></div>
+  <div class="save"><button onclick="save()">儲存發布清單</button></div>
+ </div>
+</div>
+<script>
+var TOKEN='',DATA={published:{jp:[],kr:[]},candidates:{jp:[],kr:[]}},CUR='jp';
+function el(t,a,h){var e=document.createElement(t);if(a)for(var k in a)e.setAttribute(k,a[k]);if(h!=null)e.innerHTML=h;return e}
+function load(){
+ TOKEN=document.getElementById('tok').value.trim();if(!TOKEN)return;
+ fetch('/admin/data?token='+encodeURIComponent(TOKEN)).then(function(r){return r.json()}).then(function(d){
+  if(!d.ok){alert('密碼錯誤');return}
+  DATA.published=d.published||{jp:[],kr:[]};DATA.candidates=d.candidates||{jp:[],kr:[]};
+  if(!DATA.published.jp)DATA.published.jp=[];if(!DATA.published.kr)DATA.published.kr=[];
+  localStorage.setItem('oytok',TOKEN);
+  document.getElementById('app').style.display='block';render();
+ }).catch(function(){alert('連線失敗')});
+}
+function sw(c){CUR=c;document.getElementById('t-jp').className='tab'+(c=='jp'?' on':'');document.getElementById('t-kr').className='tab'+(c=='kr'?' on':'');render()}
+function fld(it,key,ph){var i=el('input');i.value=it[key]||'';i.placeholder=ph;i.oninput=function(){it[key]=i.value};var r=el('div',{class:'row'});r.appendChild(el('label',null,ph));r.appendChild(i);return r}
+function render(){
+ var list=document.getElementById('list');list.innerHTML='';
+ var arr=DATA.published[CUR]||[];
+ arr.forEach(function(it,i){
+  var box=el('div',{class:'item'});
+  if(it.image)box.appendChild(el('img',{class:'th',src:it.image}));
+  box.appendChild(fld(it,'zh','名稱'));box.appendChild(fld(it,'term','關鍵字'));
+  box.appendChild(fld(it,'c','分類'));box.appendChild(fld(it,'e','圖示'));
+  box.appendChild(fld(it,'d','簡介'));box.appendChild(fld(it,'image','圖網址'));
+  var b=el('div',{class:'btns'});
+  var up=el('button',{class:'ghost sm'},'↑');up.onclick=function(){if(i>0){arr.splice(i-1,0,arr.splice(i,1)[0]);render()}};
+  var dn=el('button',{class:'ghost sm'},'↓');dn.onclick=function(){if(i<arr.length-1){arr.splice(i+1,0,arr.splice(i,1)[0]);render()}};
+  var del=el('button',{class:'ghost sm'},'刪除');del.onclick=function(){if(confirm('刪除這筆？')){arr.splice(i,1);render()}};
+  b.appendChild(up);b.appendChild(dn);b.appendChild(del);box.appendChild(b);list.appendChild(box);
+ });
+ var cands=document.getElementById('cands');cands.innerHTML='';
+ (DATA.candidates[CUR]||[]).forEach(function(it){
+  var c=el('div',{class:'cand'});
+  c.appendChild(el('div',null,(it.e||'')+' <b>'+(it.zh||'')+'</b><br><span class="muted">'+(it.c||'')+' · '+(it.term||'')+'</span>'));
+  var a=el('button',{class:'sm'},'加入');a.onclick=function(){DATA.published[CUR].push(JSON.parse(JSON.stringify(it)));sw(CUR)};
+  c.appendChild(a);cands.appendChild(c);
+ });
+ document.getElementById('candtime').textContent=DATA.candidates.updatedAt?('更新於 '+DATA.candidates.updatedAt):'';
+}
+function add(){DATA.published[CUR].push({zh:'',term:'',c:'',e:'🛍️',d:'',image:''});render()}
+function save(){
+ fetch('/admin/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,jp:DATA.published.jp,kr:DATA.published.kr})})
+ .then(function(r){return r.json()}).then(function(d){alert(d.ok?'已儲存 ✅ App 重新整理即生效':'儲存失敗')}).catch(function(){alert('連線失敗')});
+}
+var saved=localStorage.getItem('oytok');if(saved){document.getElementById('tok').value=saved;load()}
+</script></body></html>`;
+
+// ---- 熱門清單 (KV) ----
+// published：App 實際讀取的發布清單 {jp:[{zh,term,c,e,d,image}], kr:[...]}
+// candidates：每週 Cron 自動更新的候選池（同結構），由後台挑進 published
+const KV_PUBLISHED = 'published';
+const KV_CANDIDATES = 'candidates';
+async function kvGetJSON(env, key, fb) {
+  try { const v = await env.POPULAR_KV.get(key); return v ? JSON.parse(v) : fb; } catch { return fb; }
+}
+const okAdmin = (env, token) => env.ADMIN_TOKEN && token === env.ADMIN_TOKEN;
+
+// 每週自動產生熱門候選：AI 出當期趨勢候選 → 平台驗證（KR 用 Naver 查得到貨＋補圖）→ 存候選池
+async function genCandidates(env, country) {
+  const region = country === 'kr' ? '韓國' : '日本';
+  const langWord = country === 'kr' ? '韓文' : '日文';
+  const prompt =
+    `列出 ${region} 目前最受台灣遊客歡迎、社群（小紅書/Dcard/YouTube/IG）討論度高的必買商品 15 個，` +
+    `涵蓋「美妝・保養」「藥妝・保健」「零食・食品」三類。只回 JSON 陣列，每筆格式：` +
+    `{"zh":"繁體中文商品名(品牌+品名)","term":"當地${langWord}搜尋關鍵字","c":"分類(三選一：美妝・保養 / 藥妝・保健 / 零食・食品)","e":"分類emoji(💄/💊/🍫 擇一)","d":"一句繁中簡介(30字內)"}。` +
+    `挑真正當紅、觀光客會買的，不要冷門或在地限定品。只回 JSON 陣列，不要多餘文字、不要 markdown。`;
+  const oa = await openaiChat(env, prompt, 1400, 'gpt-4o-mini');
+  let arr = [];
+  try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
+  arr = arr.filter(x => x && x.zh && x.term).slice(0, 18);
+  if (country === 'kr') {
+    // KR：用 Naver 驗證「真的查得到貨」並補上商品圖；查不到的剔除
+    const out = [];
+    for (const it of arr) {
+      try {
+        const cands = await naverCandidates(env, [it.term]);
+        if (cands.length) out.push({ zh: it.zh, term: it.term, c: it.c || '', e: it.e || '🛍️', d: it.d || '', image: cands[0].image || '' });
+      } catch {}
+    }
+    return out;
+  }
+  // JP：樂天需 Referer，worker 端無法驗證/取圖 → 存 AI 建議，加入發布後由 App 取圖查價
+  return arr.map(x => ({ zh: x.zh, term: x.term, c: x.c || '', e: x.e || '🛍️', d: x.d || '', image: '' }));
+}
+async function refreshCandidates(env) {
+  const [jp, kr] = await Promise.all([genCandidates(env, 'jp'), genCandidates(env, 'kr')]);
+  const data = { jp, kr, updatedAt: new Date().toISOString().slice(0, 10) };
+  await env.POPULAR_KV.put(KV_CANDIDATES, JSON.stringify(data));
+  return data;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
@@ -224,6 +355,38 @@ export default {
     if (url.pathname === '/rate') {
       const [jpy, krw] = await Promise.all([rate('JPY'), rate('KRW')]);
       return json({ ok: true, jpy: jpy || FALLBACK_RATE.JPY, krw: krw || FALLBACK_RATE.KRW });
+    }
+    // App 讀發布的熱門清單；沒有資料時回空陣列（前端會退回內建靜態清單）
+    if (url.pathname === '/popular') {
+      const pub = await kvGetJSON(env, KV_PUBLISHED, { jp: [], kr: [] });
+      return json({ ok: true, jp: pub.jp || [], kr: pub.kr || [] });
+    }
+    // 後台：管理頁
+    if (url.pathname === '/admin') {
+      return new Response(ADMIN_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...CORS } });
+    }
+    if (url.pathname === '/admin/data') {
+      if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
+      return json({
+        ok: true,
+        published: await kvGetJSON(env, KV_PUBLISHED, { jp: [], kr: [] }),
+        candidates: await kvGetJSON(env, KV_CANDIDATES, { jp: [], kr: [], updatedAt: '' }),
+      });
+    }
+    if (url.pathname === '/admin/save') {
+      if (request.method !== 'POST') return json({ ok: false, error: 'POST' }, 405);
+      let body = {};
+      try { body = await request.json(); } catch {}
+      if (!okAdmin(env, body.token)) return json({ ok: false, error: 'unauthorized' }, 401);
+      const pub = { jp: Array.isArray(body.jp) ? body.jp : [], kr: Array.isArray(body.kr) ? body.kr : [] };
+      await env.POPULAR_KV.put(KV_PUBLISHED, JSON.stringify(pub));
+      return json({ ok: true });
+    }
+    // 手動觸發候選更新（後台「立即更新候選」用，免等每週 Cron）
+    if (url.pathname === '/admin/refresh') {
+      if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
+      const cand = await refreshCandidates(env);
+      return json({ ok: true, candidates: cand });
     }
     if (url.pathname === '/vision') {
       if (request.method !== 'POST') return json({ ok: false, error: 'POST image' }, 405);
@@ -319,5 +482,9 @@ export default {
     } catch (e) {
       return json({ ok: false, error: String(e.message || e) }, 502);
     }
+  },
+  // 每週 Cron：自動更新熱門候選池
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(refreshCandidates(env));
   },
 };
