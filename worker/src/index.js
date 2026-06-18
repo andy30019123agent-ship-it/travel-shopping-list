@@ -48,7 +48,6 @@ function json(obj, status = 200) {
 // 購物點：Google 地圖真實搜尋（Places API New，日韓皆可）
 async function googlePlaces(env, q, country) {
   if (!env.GOOGLE_MAPS_KEY) return [];
-  const lang = country === 'kr' ? 'ko' : 'ja';
   const region = country === 'kr' ? 'KR' : 'JP';
   const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
@@ -57,7 +56,8 @@ async function googlePlaces(env, q, country) {
       'X-Goog-Api-Key': env.GOOGLE_MAPS_KEY,
       'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.rating',
     },
-    body: JSON.stringify({ textQuery: q, languageCode: lang, regionCode: region, maxResultCount: 6 }),
+    // 名稱優先繁體中文（Google 有中文用中文、沒有則退英文羅馬拼音）
+    body: JSON.stringify({ textQuery: q, languageCode: 'zh-TW', regionCode: region, maxResultCount: 6 }),
   });
   const d = await r.json();
   return (d.places || []).map(p => ({
