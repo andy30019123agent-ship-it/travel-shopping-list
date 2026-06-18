@@ -484,6 +484,27 @@ Anua 蜂蜜面膜" style="min-height:140px"></textarea>
  </div>
 </template></div>
 
+<div class="ov" x-show="brandPick" @click.self="brandPick=null" style="display:none"><template x-if="brandPick">
+ <div class="card" style="max-width:390px">
+  <div class="pv-name" style="font-size:17px">🏷️ <span x-text="brandPick.brand"></span> 熱門品項</div>
+  <p class="muted">勾選要加入的品項；沒圖的可先加入、之後再「重抓圖」</p>
+  <div style="max-height:52vh;overflow:auto;margin-top:8px">
+   <template x-for="(it,ii) in brandPick.items" :key="ii">
+    <label style="display:flex;gap:9px;align-items:center;padding:9px 4px;border-bottom:1px solid #ECE1D8">
+     <input type="checkbox" class="chk" x-model="it._sel">
+     <template x-if="it.image"><img :src="it.image" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:#EEE6DE"></template>
+     <template x-if="!it.image"><span class="nobadge" style="margin:0">沒圖</span></template>
+     <div style="flex:1"><b x-text="it.zh"></b><div class="muted" x-text="(it.c||'')+' · '+(it.term||'')"></div></div>
+    </label>
+   </template>
+  </div>
+  <div class="iact" style="margin-top:12px">
+   <button @click="addPicked()" x-text="'加入勾選的 '+pickCount()+' 筆'"></button>
+   <button class="ghost" @click="brandPick=null">取消</button>
+  </div>
+ </div>
+</template></div>
+
 <div class="ov" x-show="pv" @click.self="pv=null" style="display:none">
  <div class="card" x-show="pv">
   <template x-if="pv&&pv.image"><img class="pvimg" :src="pv.image"></template>
@@ -500,7 +521,7 @@ Anua 蜂蜜面膜" style="min-height:140px"></textarea>
 function admin(){return{
  token:'',loggedIn:false,err:'',cur:'jp',q:'',
  data:{published:{jp:[],kr:[]},candidates:{jp:[],kr:[]}},
- expand:{},sel:{},pv:null,addForm:null,batchForm:null,toast:'',undoBuf:null,saving:false,dirty:false,uid:1,_tt:null,_dt:null,
+ expand:{},sel:{},pv:null,addForm:null,batchForm:null,brandPick:null,toast:'',undoBuf:null,saving:false,dirty:false,uid:1,_tt:null,_dt:null,
  cats:['美妝・保養','藥妝・保健','零食・食品','生活雜貨'],
  emos:['💄','💊','🍫','🧴','🍜','🍵','🧷','🛍️'],
  init(){var s=this;var t=localStorage.getItem('oytok');if(t){this.token=t;this.login(true)}
@@ -557,12 +578,17 @@ function admin(){return{
   }
   next();
  },
- addBrandAuto(){var s=this;var b=prompt('輸入品牌（例 numbuzin、DHC、Anua），自動找熱門品項：');if(!b)return;
-  s.toast='搜尋「'+b+'」中…';
+ addBrandAuto(){var s=this;var b=prompt('輸入品牌（例 numbuzin、DHC、Anua），AI 自動找熱門品項讓你挑：');if(!b)return;
+  s.toast='搜尋「'+b+'」中…(數十秒)';
   s.api('/admin/brandfill?country='+s.cur+'&brand='+encodeURIComponent(b)).then(function(r){return r.json()}).then(function(d){
-   s.toast='';if(!d.ok||!d.items||!d.items.length){alert('找不到該品牌熱門品項');return}
-   d.items.forEach(function(it){it._id=s.uid++;it._new=true;it.d=it.info||it.d||'';s.list().push(it)});s.expand[b]=true;s.dirty=true;s.flash('已加入 '+d.items.length+' 個「'+b+'」品項');
+   s.toast='';if(!d.ok||!d.items||!d.items.length){alert('找不到該品牌品項');return}
+   d.items.forEach(function(it){it._sel=true});s.brandPick={brand:b,items:d.items};
   }).catch(function(){s.toast='';alert('連線失敗')});
+ },
+ pickCount(){return (this.brandPick?this.brandPick.items:[]).filter(function(x){return x._sel}).length},
+ addPicked(){var s=this,b=this.brandPick.brand,n=this.pickCount();if(!n){alert('請至少勾一筆');return}
+  this.brandPick.items.forEach(function(it){if(it._sel){var o=Object.assign({},it);delete o._sel;o._id=s.uid++;o._new=true;o.brand=o.brand||b;o.d=o.info||o.d||'';s.list().push(o)}});
+  s.expand[b]=true;s.dirty=true;s.brandPick=null;s.flash('已加入 '+n+' 筆「'+b+'」品項');
  },
  refreshImg(it){var s=this;if(!it.term){alert('先填關鍵字');return}it._busy=true;
   s.api('/admin/refreshimg?country='+s.cur+'&term='+encodeURIComponent(it.term)).then(function(r){return r.json()}).then(function(d){
@@ -703,16 +729,16 @@ async function enrichPublished(env, country, retext = false) {
 async function brandProducts(env, country, brand) {
   const region = country === 'kr' ? '韓國' : '日本';
   const langWord = country === 'kr' ? '韓文' : '日文';
-  const prompt = `「${brand}」這個品牌在 ${region} 最受台灣遊客歡迎、最該買的 6 個熱門品項。只回 JSON 陣列，每筆：` +
+  const prompt = `列出「${brand}」這個品牌在 ${region} 真實存在、現在最熱門、台灣旅客最常買的具體品項，最多 8 個。務必用真實產品線名稱、不要編造或給泛稱。只回 JSON 陣列，每筆：` +
     `{"zh":"繁中商品名(品牌+具體品項)","term":"當地${langWord}搜尋關鍵字(品牌+品項)","c":"分類(美妝・保養 / 藥妝・保健 / 零食・食品 三選一)","e":"分類emoji(💄/💊/🍫)"}。只回 JSON、不要 markdown。`;
-  const oa = await openaiChat(env, prompt, 900, 'gpt-4o');
+  const oa = await openaiChat(env, prompt, 1100, 'gpt-4o');
   let arr = []; try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
   arr = arr.filter(x => x && x.zh && x.term).slice(0, 8);
   const items = [];
   for (const it of arr) {
     let image = '';
     try { if (country === 'kr') { image = await naverImage(env, it.term); } else { const r = await rakutenFirst(it.term); image = r?.image || ''; } } catch {}
-    if (!image) continue;
+    // 沒圖也保留（後台可手動重抓圖），不再剔除
     items.push({ brand, zh: it.zh, term: it.term, c: it.c || '', e: it.e || '🛍️', image, info: '', claim: '', d: '' });
   }
   if (items.length) {
