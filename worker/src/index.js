@@ -389,15 +389,16 @@ async function genCandidates(env, country) {
 async function enrichPublished(env, country, retext = false) {
   const pub = await kvGetJSON(env, KV_PUBLISHED, { jp: [], kr: [] });
   const list = pub[country] || [];
-  // 重抓「智慧選圖」(排除套組/最吻合)，抓不到才保留舊圖；不刪沒圖者(App 端只顯示有圖)
+  // 補圖：已有圖(智慧選過)就保留，只有缺圖才抓(避免每次重抓 N 張被限流/超子請求上限排擠文案)；不刪沒圖者
   const kept = [];
   for (const it of list) {
-    let image = '';
-    try {
-      if (country === 'kr') { image = await naverImage(env, it.term || it.zh); }
-      else { const r = await rakutenFirst(it.term || it.zh); image = r?.image || ''; }
-    } catch {}
-    if (!image) image = it.image || '';
+    let image = it.image || '';
+    if (!image) {
+      try {
+        if (country === 'kr') { image = await naverImage(env, it.term || it.zh); }
+        else { const r = await rakutenFirst(it.term || it.zh); image = r?.image || ''; }
+      } catch {}
+    }
     kept.push({ ...it, image });
   }
   // AI 產三段文案（沒 info 的才補）；CJK 輸出量大，分批每 8 筆避免被 token 上限截斷
