@@ -448,7 +448,8 @@ export default function App() {
   };
   const confirmAddPopular = () => { const p = popInfo; setPopInfo(null); if (p) addPopularItem(p); };
   // 熱門清單：優先用 worker 發布清單，沒有才退回內建靜態
-  const popList = useMemo(() => { const r = remotePopular?.[country]; return (r && r.length) ? r : STATIC_FLAT[country]; }, [remotePopular, country]);
+  // 只顯示「有圖」的熱門品（沒圖不上架）；遠端都沒有時才退回內建靜態
+  const popList = useMemo(() => { const withImg = (remotePopular?.[country] || []).filter(x => x.image); return withImg.length ? withImg : STATIC_FLAT[country]; }, [remotePopular, country]);
   const popGroups = useMemo(() => groupFlat(popList), [popList]);
   const suggestions = useMemo(() => popularMatches(popList, input), [input, popList]);
 
@@ -524,16 +525,21 @@ export default function App() {
             {state === true ? (
               <View style={styles.priceRowTight}><Skeleton /></View>
             ) : (it.price || it.actual != null) ? (
-              <View style={styles.priceRowTight}>
-                <TouchableOpacity onPress={() => setPriceEdit({ id: it.id, val: it.actual != null ? String(it.actual) : '', currency: it.currency || it.price?.currency || CO[it.country].cur })} activeOpacity={0.7} accessibilityLabel="填實際購入價"><PriceTag twd={Math.round(effLocal(it) * rateOf(it.country)) * it.qty} /></TouchableOpacity>
-                <View style={styles.priceMid}>
+              <View style={styles.priceRow2}>
+                <View style={styles.refCol}>
+                  <Text style={styles.refLabel}>參考均價</Text>
+                  <Text style={styles.refTwd}>{it.price ? `NT$${fmt(it.price.twd * it.qty)}` : '—'}</Text>
                   {it.range
-                    ? <Text style={styles.localPrice}>參考 {it.currency || CO[it.country].cur}{fmt(it.range.min)}~{fmt(it.range.max)}</Text>
-                    : (it.price ? <Text style={styles.localPrice}>{it.price.currency}{fmt(it.price.price)}</Text> : null)}
-                  {it.actual != null
-                    ? <Text style={styles.actualTxt}>實付 {it.currency || CO[it.country].cur}{fmt(it.actual)}{it.qty > 1 ? ` ×${it.qty}` : ''}</Text>
-                    : <Text style={styles.pickedTitle} numberOfLines={1}>{it.price?.title || '點台幣填實際價'}</Text>}
+                    ? <Text style={styles.refRange}>{it.currency || CO[it.country].cur}{fmt(it.range.min)}~{fmt(it.range.max)}</Text>
+                    : (it.price ? <Text style={styles.refRange}>{it.price.currency}{fmt(it.price.price)}</Text> : null)}
                 </View>
+                <TouchableOpacity style={[styles.actualCol, it.actual != null && styles.actualColOn]} onPress={() => setPriceEdit({ id: it.id, val: it.actual != null ? String(it.actual) : '', currency: it.currency || it.price?.currency || CO[it.country].cur })} activeOpacity={0.8} accessibilityLabel="填實際購入價">
+                  {it.actual != null ? (
+                    <><Text style={styles.actualLabel}>我的實付</Text><Text style={styles.actualBig}>NT${fmt(Math.round(it.actual * rateOf(it.country)) * it.qty)}</Text><Text style={styles.actualLocal}>{it.currency || CO[it.country].cur}{fmt(it.actual)}{it.qty > 1 ? ` ×${it.qty}` : ''}</Text></>
+                  ) : (
+                    <><Ionicons name="add-circle" size={17} color={C.roseDeep} /><Text style={styles.actualFill}>填實付</Text></>
+                  )}
+                </TouchableOpacity>
                 {it.candidates && it.candidates.length ? <TouchableOpacity style={styles.changeBtn} onPress={() => openPicker(it)} activeOpacity={0.8}><Ionicons name="swap-horizontal" size={14} color={C.roseDeep} /></TouchableOpacity> : null}
               </View>
             ) : (
@@ -807,13 +813,28 @@ export default function App() {
         <View style={styles.centerBackdrop}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setPopInfo(null)} />
           <View style={styles.storeModal}>
-            {popInfo?.image ? <Image source={{ uri: popInfo.image }} style={styles.popInfoImg} resizeMode="contain" /> : <Text style={styles.popInfoEmoji}>{popInfo?.e || '🛍️'}</Text>}
-            <Text style={styles.popInfoName}>{popInfo?.zh}</Text>
-            {popInfo?.d ? <View style={styles.scanInfoBox}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.scanInfo}>{popInfo.d}</Text></View> : null}
-            <Text style={styles.popInfoHint}>加入後會自動到當地比價、換算台幣 💰</Text>
-            <TouchableOpacity style={[styles.storeSave, { marginTop: 14 }]} onPress={confirmAddPopular} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>加入清單並比價</Text></TouchableOpacity>
-            <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setPopInfo(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
-            <Text style={styles.scanDisclaim}>僅提供產品資訊參考，不作為購物建議</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 540 }}>
+              {popInfo?.image ? <Image source={{ uri: popInfo.image }} style={styles.popInfoImg} resizeMode="contain" /> : <Text style={styles.popInfoEmoji}>{popInfo?.e || '🛍️'}</Text>}
+              <Text style={styles.popInfoName}>{popInfo?.zh}</Text>
+              {(popInfo?.info || popInfo?.d) ? <View style={styles.scanInfoBox}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.scanInfo}>{popInfo.info || popInfo.d}</Text></View> : null}
+              {popInfo?.usage ? <View style={styles.scanInfoBox}><Ionicons name="color-wand-outline" size={15} color={C.gold} /><Text style={styles.scanInfo}>{popInfo.usage}</Text></View> : null}
+              {popInfo?.claim ? (
+                <View style={styles.claimBox}>
+                  <Text style={styles.claimLabel}>✨ 主打效果（廠商宣稱／社群分享）</Text>
+                  <Text style={styles.claimTxt}>{popInfo.claim}</Text>
+                  <Text style={styles.claimNote}>以上為產品宣傳說法，效果因人而異</Text>
+                </View>
+              ) : null}
+              {popInfo?.zh ? (
+                <TouchableOpacity style={styles.scanReviewBtn} onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent((popInfo.zh || '') + ' 推薦 評價 心得')}`)} activeOpacity={0.85}>
+                  <Ionicons name="search-outline" size={14} color={C.inkSoft} />
+                  <Text style={styles.scanReviewTxt}>看網友推薦・評價（部落格／社群）›</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={[styles.storeSave, { marginTop: 14 }]} onPress={confirmAddPopular} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>加入清單並比價</Text></TouchableOpacity>
+              <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setPopInfo(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
+              <Text style={styles.scanDisclaim}>僅提供產品資訊參考，不作為購物建議</Text>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -845,6 +866,13 @@ export default function App() {
               <View style={{ flex: 1 }}><Text style={styles.sheetKicker} numberOfLines={1}>{picker?.name}</Text><Text style={styles.sheetTitle}>選一個正確的</Text></View>
               <TouchableOpacity onPress={() => setPicker(null)} hitSlop={10}><Ionicons name="close" size={24} color={C.muted} /></TouchableOpacity>
             </View>
+            <View style={styles.pickerNone}>
+              <Text style={styles.pickerNoneLabel}>⚠️ 都不是我要的？</Text>
+              <View style={styles.pickerNoneRow}>
+                <TouchableOpacity style={styles.pickerNoneBtn} onPress={() => { const id = picker.itemId; const it = items.find(i => i.id === id); const cur = picker.currency || CO[it?.country || country].cur; setPicker(null); update(id, { price: null, range: null, candidates: null }); setPriceEdit({ id, val: '', currency: cur }); }} activeOpacity={0.85}><Ionicons name="create-outline" size={15} color={C.roseDeep} /><Text style={styles.pickerNoneTxt}>自填價格</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.pickerNoneBtn} onPress={() => { const id = picker.itemId; setPicker(null); pickImage(id); }} activeOpacity={0.85}><Ionicons name="image-outline" size={15} color={C.roseDeep} /><Text style={styles.pickerNoneTxt}>上傳商品圖</Text></TouchableOpacity>
+              </View>
+            </View>
             <View style={styles.repickRow}>
               <Ionicons name="search-outline" size={15} color={C.gold} />
               <TextInput style={styles.repickInput} value={picker?.term} placeholder="找不到？改關鍵字" placeholderTextColor="#cdbdb0" onChangeText={t => setPicker(p => ({ ...p, term: t }))} />
@@ -862,10 +890,6 @@ export default function App() {
             <TouchableOpacity style={styles.seeAllBtn} onPress={() => { const t = picker.term || picker.name; setPicker(null); openUrl(localSearchUrl(items.find(i => i.id === picker.itemId)?.country || country, t)); }} activeOpacity={0.85}>
               <Ionicons name="open-outline" size={15} color={C.inkSoft} />
               <Text style={styles.seeAllTxt}>用瀏覽器開官網看全部</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.noneBtn} onPress={() => { const id = picker.itemId; const it = items.find(i => i.id === id); const cur = picker.currency || CO[it?.country || country].cur; setPicker(null); update(id, { image: '', imageManual: false }); setPriceEdit({ id, val: '', currency: cur }); }} activeOpacity={0.85}>
-              <Ionicons name="trash-outline" size={15} color={C.muted} />
-              <Text style={styles.noneTxt}>都沒有正確的 → 清除照片，可自填價格</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1193,6 +1217,17 @@ const styles = StyleSheet.create({
   linkTxt: { color: C.inkSoft, fontSize: 12, fontWeight: '700' },
   doneBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 11 },
   priceRowTight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  priceRow2: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  refCol: { justifyContent: 'center' },
+  refLabel: { color: C.muted, fontSize: 10.5, fontWeight: '700' },
+  refTwd: { color: C.inkSoft, fontSize: 14, fontWeight: '800', fontFamily: MONO, marginTop: 1 },
+  refRange: { color: C.muted, fontSize: 10.5, fontFamily: MONO, marginTop: 1 },
+  actualCol: { flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 4, backgroundColor: C.roseSoft, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 6 },
+  actualColOn: { backgroundColor: C.rose },
+  actualLabel: { color: '#fff', fontSize: 10.5, fontWeight: '700', width: '100%', textAlign: 'center' },
+  actualBig: { color: '#fff', fontSize: 17, fontWeight: '900', fontFamily: MONO },
+  actualLocal: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontFamily: MONO, width: '100%', textAlign: 'center' },
+  actualFill: { color: C.roseDeep, fontSize: 14, fontWeight: '800' },
   moreBox: { marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 11, gap: 4 },
   cardFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 10 },
   moreToggle: { flexDirection: 'row', alignItems: 'center', gap: 3 },
@@ -1276,6 +1311,11 @@ const styles = StyleSheet.create({
   candPickTxt: { color: C.roseDeep, fontWeight: '800', fontSize: 13 },
   seeAllBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 14, paddingVertical: 12, borderRadius: 12, backgroundColor: C.bg },
   seeAllTxt: { color: C.inkSoft, fontWeight: '700', fontSize: 13.5 },
+  pickerNone: { backgroundColor: '#FBF3E4', borderRadius: 12, padding: 10, marginBottom: 12 },
+  pickerNoneLabel: { color: C.gold, fontSize: 12.5, fontWeight: '800', marginBottom: 7 },
+  pickerNoneRow: { flexDirection: 'row', gap: 8 },
+  pickerNoneBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: '#fff', borderRadius: 10, paddingVertical: 10 },
+  pickerNoneTxt: { color: C.roseDeep, fontWeight: '800', fontSize: 13.5 },
   noneBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, paddingVertical: 11 },
   noneTxt: { color: C.muted, fontWeight: '700', fontSize: 13 },
 

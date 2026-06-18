@@ -5,6 +5,23 @@
 //     日本：只回關鍵字＋匯率（前端瀏覽器自己直連樂天，因 Worker 帶不了 Referer）
 
 const RAKUTEN_REFERER = 'https://andy30019123agent-ship-it.github.io/';
+// pk_ 是可公開(publishable)金鑰、綁網域，放後端 OK；worker 自己帶 Referer 就能呼叫樂天
+const RAKUTEN_APP_ID = '3ec6041d-d772-4a05-861a-9d15ec64dafa';
+const RAKUTEN_ACCESS_KEY = 'pk_SuWs3ZCwNcFZS14BLH8QbOcDkOOBMKlyDRp7L3a2ANN';
+// 取樂天該關鍵字第一筆商品的圖與價（worker 端帶 Referer 即可，實測可用）
+async function rakutenFirst(term) {
+  try {
+    const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
+      `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${encodeURIComponent(term)}&hits=3&format=json`;
+    const r = await fetch(url, { headers: { Referer: RAKUTEN_REFERER, Origin: RAKUTEN_REFERER.replace(/\/$/, '') } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const it = (j.Items || [])[0]?.Item || (j.Items || [])[0];
+    if (!it) return null;
+    const img = it.mediumImageUrls?.[0]?.imageUrl || it.mediumImageUrls?.[0] || it.imageUrl || '';
+    return { image: (img || '').replace(/\?_ex=\d+x\d+$/, ''), price: it.itemPrice || 0 };
+  } catch { return null; }
+}
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -321,25 +338,69 @@ async function genCandidates(env, country) {
   const prompt =
     `列出 ${region} 目前最受台灣遊客歡迎、社群（小紅書/Dcard/YouTube/IG）討論度高的必買商品 15 個，` +
     `涵蓋「美妝・保養」「藥妝・保健」「零食・食品」三類。只回 JSON 陣列，每筆格式：` +
-    `{"zh":"繁體中文商品名(品牌+品名)","term":"當地${langWord}搜尋關鍵字","c":"分類(三選一：美妝・保養 / 藥妝・保健 / 零食・食品)","e":"分類emoji(💄/💊/🍫 擇一)","d":"一句繁中簡介(30字內)"}。` +
+    `{"zh":"繁體中文商品名(品牌+品名)","term":"當地${langWord}搜尋關鍵字","c":"分類(三選一：美妝・保養 / 藥妝・保健 / 零食・食品)","e":"分類emoji(💄/💊/🍫 擇一)",` +
+    `"info":"客觀說明這是什麼類型的產品與主要用途，一句話約40字，不要提國籍產地","usage":"使用方式；食品就寫口味或食用方式，約40字","claim":"主打效果與產品特色，約80字，用詞中性正面、避免誇大療效或負面字眼"}。` +
     `挑真正當紅、觀光客會買的，不要冷門或在地限定品。只回 JSON 陣列，不要多餘文字、不要 markdown。`;
-  const oa = await openaiChat(env, prompt, 1400, 'gpt-4o-mini');
+  const oa = await openaiChat(env, prompt, 3000, 'gpt-4o-mini');
   let arr = [];
   try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
   arr = arr.filter(x => x && x.zh && x.term).slice(0, 18);
-  if (country === 'kr') {
-    // KR：用 Naver 驗證「真的查得到貨」並補上商品圖；查不到的剔除
-    const out = [];
-    for (const it of arr) {
+  // 每品取「真的查得到的商品圖」(KR=Naver、JP=樂天)，沒圖不上架
+  const out = [];
+  for (const it of arr) {
+    let image = '';
+    try {
+      if (country === 'kr') { const c = await naverCandidates(env, [it.term]); image = c[0]?.image || ''; }
+      else { const r = await rakutenFirst(it.term); image = r?.image || ''; }
+    } catch {}
+    if (!image) continue;
+    out.push({
+      zh: it.zh, term: it.term, c: it.c || '', e: it.e || '🛍️', image,
+      info: (it.info || '').trim().slice(0, 100), usage: (it.usage || '').trim().slice(0, 100), claim: (it.claim || '').trim().slice(0, 200),
+      d: (it.info || '').trim().slice(0, 100),
+    });
+  }
+  return out;
+}
+// 回填：把發布清單每筆補上「商品圖＋三段文案(info/usage/claim)」，沒圖的剔除（沒圖不上架）
+async function enrichPublished(env, country) {
+  const pub = await kvGetJSON(env, KV_PUBLISHED, { jp: [], kr: [] });
+  const list = pub[country] || [];
+  // 補圖（不刪沒圖的，保留資料；App 端只顯示有圖者＝沒圖不上架）
+  const kept = [];
+  for (const it of list) {
+    let image = it.image || '';
+    if (!image) {
       try {
-        const cands = await naverCandidates(env, [it.term]);
-        if (cands.length) out.push({ zh: it.zh, term: it.term, c: it.c || '', e: it.e || '🛍️', d: it.d || '', image: cands[0].image || '' });
+        if (country === 'kr') { const c = await naverCandidates(env, [it.term || it.zh]); image = c[0]?.image || ''; }
+        else { const r = await rakutenFirst(it.term || it.zh); image = r?.image || ''; }
       } catch {}
     }
-    return out;
+    kept.push({ ...it, image });
   }
-  // JP：樂天需 Referer，worker 端無法驗證/取圖 → 存 AI 建議，加入發布後由 App 取圖查價
-  return arr.map(x => ({ zh: x.zh, term: x.term, c: x.c || '', e: x.e || '🛍️', d: x.d || '', image: '' }));
+  // AI 產三段文案（沒 info 的才補）；CJK 輸出量大，分批每 8 筆避免被 token 上限截斷
+  const need = kept.filter(it => !it.info);
+  for (let i = 0; i < need.length; i += 8) {
+    const chunk = need.slice(i, i + 8);
+    const prompt = `為以下商品各寫產品文案，只回 JSON 陣列、順序與輸入相同，每筆：` +
+      `{"zh":"原商品名","info":"客觀說明這是什麼與主要用途，約40字，不提國籍產地","usage":"使用或食用方式，約40字","claim":"主打效果與特色，約80字，用詞中性、避免誇大療效"}。` +
+      `商品清單：${JSON.stringify(chunk.map(it => it.zh))}。只回 JSON 陣列，不要 markdown。`;
+    const oa = await openaiChat(env, prompt, 2200, 'gpt-4o-mini');
+    let arr = [];
+    try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
+    const byName = {};
+    for (const r of arr) { if (r && r.zh) byName[r.zh] = r; }
+    chunk.forEach((it, idx) => {
+      const r = byName[it.zh] || arr[idx] || {};
+      it.info = (r.info || '').trim().slice(0, 100);
+      it.usage = (r.usage || '').trim().slice(0, 100);
+      it.claim = (r.claim || '').trim().slice(0, 200);
+      it.d = it.info;
+    });
+  }
+  pub[country] = kept;
+  await env.POPULAR_KV.put(KV_PUBLISHED, JSON.stringify(pub));
+  return { country, kept: kept.length, total: list.length };
 }
 async function refreshCandidates(env) {
   const [jp, kr] = await Promise.all([genCandidates(env, 'jp'), genCandidates(env, 'kr')]);
@@ -387,6 +448,12 @@ export default {
       if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
       const cand = await refreshCandidates(env);
       return json({ ok: true, candidates: cand });
+    }
+    // 回填發布清單的圖與文案（沒圖剔除）
+    if (url.pathname === '/admin/enrich') {
+      if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
+      const c = url.searchParams.get('country') === 'jp' ? 'jp' : 'kr';
+      return json({ ok: true, ...(await enrichPublished(env, c)) });
     }
     if (url.pathname === '/vision') {
       if (request.method !== 'POST') return json({ ok: false, error: 'POST image' }, 405);
@@ -467,16 +534,14 @@ export default {
         const candidates = await naverCandidates(env, [givenTerm]);
         return json({ ok: true, country: 'kr', raw: givenTerm, term: givenTerm, terms: [givenTerm], rate: krwRate, currency: '₩', candidates, ...urlExtra });
       }
-      let usedTerm = item;
-      let candidates = await naverCandidates(env, [item]); // 原文先搜
-      if (candidates.length < 3) {
-        const translated = (await guessTerms(env, item, country))[0];
-        if (translated && normalize(translated) !== normalize(item)) {
-          const more = await naverCandidates(env, [translated]);
-          const seen = new Set(candidates.map(c => c.title.slice(0, 14)));
-          for (const m of more) { if (!seen.has(m.title.slice(0, 14))) { candidates.push(m); seen.add(m.title.slice(0, 14)); } }
-          if (candidates.length) usedTerm = translated;
-        }
+      // 先用 OpenAI(或對照表)解析成確切商品的韓文關鍵字再搜，較精準；不足再補搜原文
+      const resolved = (await guessTerms(env, item, country))[0];
+      let usedTerm = (resolved && resolved.trim()) ? resolved : item;
+      let candidates = await naverCandidates(env, [usedTerm]);
+      if (candidates.length < 3 && normalize(usedTerm) !== normalize(item)) {
+        const more = await naverCandidates(env, [item]);
+        const seen = new Set(candidates.map(c => c.title.slice(0, 14)));
+        for (const m of more) { if (!seen.has(m.title.slice(0, 14))) { candidates.push(m); seen.add(m.title.slice(0, 14)); } }
       }
       return json({ ok: true, country: 'kr', raw: item, term: usedTerm, terms: [usedTerm], rate: krwRate, currency: '₩', candidates, ...urlExtra });
     } catch (e) {
