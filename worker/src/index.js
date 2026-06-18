@@ -299,7 +299,7 @@ function render(){
  arr.forEach(function(it,i){
   var box=el('div',{class:'item'});
   if(it.image)box.appendChild(el('img',{class:'th',src:it.image}));
-  box.appendChild(fld(it,'zh','名稱'));box.appendChild(fld(it,'term','關鍵字'));
+  box.appendChild(fld(it,'brand','品牌'));box.appendChild(fld(it,'zh','名稱'));box.appendChild(fld(it,'term','關鍵字'));
   box.appendChild(fld(it,'c','分類'));box.appendChild(fld(it,'e','圖示'));
   box.appendChild(fld(it,'d','簡介'));box.appendChild(fld(it,'image','圖網址'));
   var b=el('div',{class:'btns'});
@@ -317,7 +317,7 @@ function render(){
  });
  document.getElementById('candtime').textContent=DATA.candidates.updatedAt?('更新於 '+DATA.candidates.updatedAt):'';
 }
-function add(){DATA.published[CUR].push({zh:'',term:'',c:'',e:'🛍️',d:'',image:''});render()}
+function add(){DATA.published[CUR].push({brand:'',zh:'',term:'',c:'',e:'🛍️',d:'',image:''});render()}
 function save(){
  fetch('/admin/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,jp:DATA.published.jp,kr:DATA.published.kr})})
  .then(function(r){return r.json()}).then(function(d){alert(d.ok?'已儲存 ✅ App 重新整理即生效':'儲存失敗')}).catch(function(){alert('連線失敗')});
@@ -342,14 +342,14 @@ async function genCandidates(env, country) {
   const prompt =
     `列出 ${region} 目前最受台灣遊客歡迎、社群（小紅書/Dcard/YouTube/IG）討論度高的必買商品 24 個，` +
     `涵蓋「美妝・保養」「藥妝・保健」「零食・食品」三類。` +
-    `重要：熱門品牌請把它「最紅的 2~3 個不同品項」各自獨立列出（例：numbuzin 要分防曬精華、數字面膜、3號精華；medicube 分膠原精華、紅光面膜、毛孔墊片；DHC 分卸妝油、藍莓、葉黃素），不要一個品牌只放一筆。` +
-    `只回 JSON 陣列，每筆格式（先不要寫文案，文案發布時另外補）：` +
-    `{"zh":"繁體中文商品名(品牌+具體品項，例 numbuzin 無濾鏡防曬精華)","term":"當地${langWord}搜尋關鍵字(品牌+品項)","c":"分類(三選一：美妝・保養 / 藥妝・保健 / 零食・食品)","e":"分類emoji(💄/💊/🍫 擇一)"}。` +
+    `做法：先想出當紅的「熱門品牌」(美妝保養尤其多，如 numbuzin、medicube、Anua、Torriden、COSRX、skin1004、Mediheal、innisfree、Etude、雪花秀…)，每個熱門品牌再各自列出它「最紅的 3~5 個不同品項」(例 numbuzin 1號舒緩面膜、2號膠原面膜、3號毛孔面膜、5號美白面膜；medicube 膠原精華、紅光面膜、毛孔墊片)。` +
+    `只回 JSON 陣列、每個品項一筆(同品牌多筆)，每筆格式（先不要寫文案，文案發布時另外補）：` +
+    `{"brand":"品牌名(原文/英文，例 numbuzin、medicube、DHC)","zh":"繁中商品名(品牌+具體品項)","term":"當地${langWord}搜尋關鍵字(品牌+品項)","c":"分類(三選一：美妝・保養 / 藥妝・保健 / 零食・食品)","e":"分類emoji(💄/💊/🍫 擇一)"}。` +
     `挑真正當紅、觀光客會買的，不要冷門或在地限定品。只回 JSON 陣列，不要多餘文字、不要 markdown。`;
   const oa = await openaiChat(env, prompt, 2000, 'gpt-4o-mini');
   let arr = [];
   try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
-  arr = arr.filter(x => x && x.zh && x.term).slice(0, 26);
+  arr = arr.filter(x => x && x.zh && x.term).slice(0, 30);
   // 每品取「真的查得到的商品圖」(KR=Naver、JP=樂天)，沒圖不上架。文案留空→發布時 enrich 分批補
   const out = [];
   for (const it of arr) {
@@ -360,9 +360,8 @@ async function genCandidates(env, country) {
     } catch {}
     if (!image) continue;
     out.push({
-      zh: it.zh, term: it.term, c: it.c || '', e: it.e || '🛍️', image,
-      info: (it.info || '').trim().slice(0, 100), usage: (it.usage || '').trim().slice(0, 100), claim: (it.claim || '').trim().slice(0, 200),
-      d: (it.info || '').trim().slice(0, 100),
+      brand: (it.brand || '').trim().slice(0, 30), zh: it.zh, term: it.term, c: it.c || '', e: it.e || '🛍️', image,
+      info: '', usage: '', claim: '', d: '',
     });
   }
   return out;

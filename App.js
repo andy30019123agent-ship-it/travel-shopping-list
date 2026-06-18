@@ -169,6 +169,21 @@ function groupFlat(arr) {
   }
   return groups;
 }
+// 分類內再依品牌分組：同品牌多品項→品牌標題+品項；單品項→直接顯示
+function groupByBrand(items) {
+  const order = [], map = {};
+  for (const it of (items || [])) {
+    // 有 brand 欄位優先；沒有就用「有空格時的首字」當品牌(讓舊資料如 DHC 葉黃素 也能歸類)
+    const z = (it.zh || '').trim();
+    const b = (it.brand || '').trim() || (z.includes(' ') ? z.split(/\s+/)[0] : '');
+    const key = b || ('__' + z);
+    if (!(key in map)) { map[key] = { brand: b, items: [] }; order.push(key); }
+    map[key].items.push(it);
+  }
+  return order.map(k => map[k]);
+}
+// 品牌標題下的品項顯示名（去掉品牌前綴）
+const stripBrand = (zh, brand) => { const s = (zh || '').replace(new RegExp('^\\s*' + (brand || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '').trim(); return s || zh; };
 
 // 樂天市場商品搜尋（單一賣場的商品列表）
 async function rakutenSearch(term, hits = 20) {
@@ -895,14 +910,30 @@ export default function App() {
               {popGroups.map(g => (
                 <View key={g.c} style={{ marginBottom: 16 }}>
                   <Text style={styles.popCat}>{g.e} {g.c}</Text>
-                  <View style={styles.popWrap}>
-                    {g.list.map(p => (
-                      <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`加入 ${p.zh}`}>
-                        <Text style={styles.popChipTxt}>{p.zh}</Text>
-                        <Ionicons name="add" size={15} color={C.roseDeep} />
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+                  {groupByBrand(g.list).map((bg, bi) => (
+                    bg.brand && bg.items.length >= 2 ? (
+                      <View key={bg.brand} style={styles.brandGroup}>
+                        <Text style={styles.brandName}>{bg.brand}</Text>
+                        <View style={styles.popWrap}>
+                          {bg.items.map(p => (
+                            <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`加入 ${p.zh}`}>
+                              <Text style={styles.popChipTxt}>{stripBrand(p.zh, bg.brand)}</Text>
+                              <Ionicons name="add" size={15} color={C.roseDeep} />
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    ) : (
+                      <View key={'s' + bi} style={styles.popWrap}>
+                        {bg.items.map(p => (
+                          <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`加入 ${p.zh}`}>
+                            <Text style={styles.popChipTxt}>{p.zh}</Text>
+                            <Ionicons name="add" size={15} color={C.roseDeep} />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )
+                  ))}
                 </View>
               ))}
               <Text style={styles.popHint}>點一下會先看產品介紹，再決定要不要加入比價</Text>
@@ -1151,7 +1182,9 @@ const styles = StyleSheet.create({
   suggestTerm: { color: C.muted, fontSize: 12, flex: 1, fontFamily: MONO },
 
   popCat: { color: C.inkSoft, fontSize: 13, fontWeight: '800', marginBottom: 9 },
-  popWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  brandGroup: { marginBottom: 10, paddingLeft: 4, borderLeftWidth: 2, borderLeftColor: C.roseSoft },
+  brandName: { color: C.roseDeep, fontSize: 12.5, fontWeight: '900', marginBottom: 6, marginLeft: 4 },
+  popWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   popChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.roseSoft, borderRadius: 999, paddingLeft: 13, paddingRight: 9, paddingVertical: 9 },
   popChipTxt: { color: C.roseDeep, fontSize: 13.5, fontWeight: '700' },
   popHint: { color: C.muted, fontSize: 12, textAlign: 'center', marginTop: 2, marginBottom: 6 },
