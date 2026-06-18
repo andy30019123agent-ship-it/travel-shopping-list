@@ -68,10 +68,14 @@ function pickBest(cands) {
 // 一鍵到當地購物網站看完整結果
 function localSearchUrl(country, term) {
   const q = enc(term || '');
+  // 韓國改導 Google：Naver 購物搜尋頁會跳人機驗證 → 連結等於失效
   return country === 'kr'
-    ? `https://search.shopping.naver.com/search/all?query=${q}`
+    ? `https://www.google.com/search?q=${q}`
     : `https://search.rakuten.co.jp/search/mall/${q}/`;
 }
+const sourceUrl = (it) => it.country === 'kr'
+  ? `https://www.google.com/search?q=${enc(it.price?.title || it.name || '')}`
+  : (it.price?.url || '');
 
 // 熱門必買商品庫（日/韓代購常見品，term 已對好當地關鍵字，查價更準）
 const POPULAR = {
@@ -286,6 +290,7 @@ export default function App() {
   const [guide, setGuide] = useState(false); // 使用說明彈窗
   const [popInfo, setPopInfo] = useState(null); // 熱門品介紹卡 {zh, term, d, e, image}
   const [remotePopular, setRemotePopular] = useState(null); // 從 worker 讀的發布熱門清單 {jp,kr}
+  const [addBought, setAddBought] = useState(null); // 記帳頁手動新增已買 {country,name,val,store,note}
   const [rates, setRates] = useState({ jpy: 0.197, krw: 0.021 });
   useFonts(Ionicons.font);
 
@@ -319,9 +324,12 @@ export default function App() {
       const { term, currency, candidates, resolvedImage, resolvedPrice, rate } = await fetchCandidates(item);
       const patch = { term, currency, candidates };
       if (resolvedImage && !item.imageManual) patch.image = resolvedImage; // 貼網址→先用該頁照片
-      if (!candidates.length) { patch.noResult = true; patch.price = null; }
+      if (!candidates.length) { patch.noResult = true; patch.price = null; patch.range = null; }
       else {
         patch.noResult = false;
+        // 參考價區間：候選中的最低～最高（當地幣）
+        const prices = candidates.map(c => c.price).filter(p => p > 0);
+        patch.range = prices.length ? { min: Math.min(...prices), max: Math.max(...prices) } : null;
         // 貼網址(resolvedPrice>0)：預設選該頁商品(候選第一筆)；一般查詢：取中位數價那筆
         const c = resolvedPrice > 0 ? candidates[0] : pickBest(candidates);
         patch.price = { price: c.price, twd: c.twd, currency, title: c.title, url: c.url };
@@ -392,7 +400,7 @@ export default function App() {
       const a = res.assets[0];
       let b64 = a.base64;
       if (!b64) { setScanning(false); return; }
-      const r = await fetch(`${WORKER_URL}/vision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: b64, country }) });
+      const r = await fetch(`${WORKER_URL}/vision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: b64 }) });
       const d = await r.json();
       setScanning(false);
       // 三層：認不出→提示；沒十足把握(uncertain)→跳「是不是 XXX」確認；有把握→正常識物卡
@@ -422,7 +430,7 @@ export default function App() {
   function switchCountry(c) {
     if (c === country) return;
     setCountry(c);
-    const updated = items.map(it => it.status === 'todo' ? { ...it, country: c, term: '', price: null, candidates: null, noResult: false, image: it.imageManual ? it.image : '' } : it);
+    const updated = items.map(it => it.status === 'todo' ? { ...it, country: c, term: '', price: null, range: null, actual: null, candidates: null, noResult: false, image: it.imageManual ? it.image : '' } : it);
     setItems(updated);
   }
   // 從熱門庫/建議加入：term 先對好當地關鍵字，加完自動查價（中位數）
@@ -431,6 +439,7 @@ export default function App() {
   // 熱門必買面板：點擊先跳介紹卡，再決定加入
   // 熱門品點擊：先跳介紹卡；若沒圖就即時抓一張商品圖補上
   const addPopular = (p) => {
+    setShowPopular(false); // 先關熱門面板，介紹卡才不會被蓋住
     setPopInfo(p);
     if (!p.image) {
       fetch(`${WORKER_URL}/price?item=${encodeURIComponent(p.term || p.zh)}&country=${country}`)
@@ -443,8 +452,20 @@ export default function App() {
   const popGroups = useMemo(() => groupFlat(popList), [popList]);
   const suggestions = useMemo(() => popularMatches(popList, input), [input, popList]);
 
-  function completeItem(item) { update(item.id, { status: 'bought', store: item.store || '', boughtLocal: item.price ? item.price.price : 0 }); showToast(`已移到記帳：${item.name}`, () => update(item.id, { status: 'todo' })); }
+  function completeItem(item) { update(item.id, { status: 'bought', store: item.store || '', boughtLocal: effLocal(item) }); showToast(`已移到記帳：${item.name}`, () => update(item.id, { status: 'todo' })); }
   function unbuy(item) { update(item.id, { status: 'todo' }); }
+  // 記帳頁手動新增一筆已買（不經待買清單）
+  function saveAddBought() {
+    const f = addBought; const name = (f.name || '').trim();
+    if (!name) { setAddBought(null); return; }
+    const v = parseFloat(f.val) || 0;
+    const c = f.country || country;
+    const it = { id: Date.now().toString() + Math.random().toString(36).slice(2, 5), name, country: c, qty: 1, note: (f.note || '').trim(), term: '', image: '', imageManual: false, status: 'bought', price: null, currency: CO[c].cur, store: (f.store || '').trim(), boughtLocal: v };
+    setItems(prev => [it, ...prev]);
+    if (f.store) rememberStore(f.store.trim());
+    setAddBought(null);
+    showToast(`已新增已買：${name}`);
+  }
   function removeItem(id) { const it = items.find(x => x.id === id); setItems(prev => prev.filter(x => x.id !== id)); if (it) showToast(`已刪除：${it.name}`, () => setItems(prev => [it, ...prev])); }
 
   const todoItems = useMemo(() => {
@@ -453,7 +474,9 @@ export default function App() {
   }, [items, sort]);
   const boughtItems = useMemo(() => items.filter(i => i.status === 'bought'), [items]);
 
-  const todoTotal = useMemo(() => todoItems.reduce((s, it) => s + (it.price ? it.price.twd * it.qty : 0), 0), [todoItems]);
+  // 每件「有效當地單價」：優先用實際購入價，否則用參考區間中位數，再否則用挑到的那筆
+  const effLocal = (it) => it.actual != null ? it.actual : (it.range ? Math.round((it.range.min + it.range.max) / 2) : (it.price ? it.price.price : 0));
+  const todoTotal = useMemo(() => todoItems.reduce((s, it) => s + Math.round(effLocal(it) * rateOf(it.country)) * it.qty, 0), [todoItems, rates]);
   // 記帳：依店家分組
   const ledger = useMemo(() => {
     const groups = {};
@@ -500,14 +523,18 @@ export default function App() {
           <View style={[styles.bodyRight, { justifyContent: 'space-between' }]}>
             {state === true ? (
               <View style={styles.priceRowTight}><Skeleton /></View>
-            ) : it.price ? (
+            ) : (it.price || it.actual != null) ? (
               <View style={styles.priceRowTight}>
-                <TouchableOpacity onPress={() => setPriceEdit({ id: it.id, val: String(it.price.price), currency: it.price.currency })} activeOpacity={0.7} accessibilityLabel="編輯價格"><PriceTag twd={it.price.twd * it.qty} /></TouchableOpacity>
+                <TouchableOpacity onPress={() => setPriceEdit({ id: it.id, val: it.actual != null ? String(it.actual) : '', currency: it.currency || it.price?.currency || CO[it.country].cur })} activeOpacity={0.7} accessibilityLabel="填實際購入價"><PriceTag twd={Math.round(effLocal(it) * rateOf(it.country)) * it.qty} /></TouchableOpacity>
                 <View style={styles.priceMid}>
-                  <Text style={styles.localPrice}>{it.price.currency}{fmt(it.price.price)}{it.qty > 1 ? ` ×${it.qty}` : ''}</Text>
-                  <Text style={styles.pickedTitle} numberOfLines={1}>{it.price.title}</Text>
+                  {it.range
+                    ? <Text style={styles.localPrice}>參考 {it.currency || CO[it.country].cur}{fmt(it.range.min)}~{fmt(it.range.max)}</Text>
+                    : (it.price ? <Text style={styles.localPrice}>{it.price.currency}{fmt(it.price.price)}</Text> : null)}
+                  {it.actual != null
+                    ? <Text style={styles.actualTxt}>實付 {it.currency || CO[it.country].cur}{fmt(it.actual)}{it.qty > 1 ? ` ×${it.qty}` : ''}</Text>
+                    : <Text style={styles.pickedTitle} numberOfLines={1}>{it.price?.title || '點台幣填實際價'}</Text>}
                 </View>
-                <TouchableOpacity style={styles.changeBtn} onPress={() => openPicker(it)} activeOpacity={0.8}><Ionicons name="swap-horizontal" size={14} color={C.roseDeep} /></TouchableOpacity>
+                {it.candidates && it.candidates.length ? <TouchableOpacity style={styles.changeBtn} onPress={() => openPicker(it)} activeOpacity={0.8}><Ionicons name="swap-horizontal" size={14} color={C.roseDeep} /></TouchableOpacity> : null}
               </View>
             ) : (
               <View style={styles.priceRowTight}>
@@ -524,7 +551,7 @@ export default function App() {
             <View style={styles.bodyRow}>
               <View style={styles.miniSeg}>
                 {['jp', 'kr'].map(c => (
-                  <TouchableOpacity key={c} style={[styles.miniSegBtn, it.country === c && styles.miniSegOn]} onPress={() => { if (it.country !== c) update(it.id, { country: c, term: '', price: null, candidates: null, noResult: false, image: it.imageManual ? it.image : '' }); }} accessibilityLabel={CO[c].label}><Text style={[styles.miniSegTxt, it.country === c && styles.miniSegTxtOn]}>{CO[c].flag}</Text></TouchableOpacity>
+                  <TouchableOpacity key={c} style={[styles.miniSegBtn, it.country === c && styles.miniSegOn]} onPress={() => { if (it.country !== c) update(it.id, { country: c, term: '', price: null, range: null, actual: null, candidates: null, noResult: false, image: it.imageManual ? it.image : '' }); }} accessibilityLabel={CO[c].label}><Text style={[styles.miniSegTxt, it.country === c && styles.miniSegTxtOn]}>{CO[c].flag}</Text></TouchableOpacity>
                 ))}
               </View>
               <View style={styles.qty}>
@@ -540,8 +567,8 @@ export default function App() {
           <View style={styles.moreBox}>
             <TextInput style={styles.note} placeholder="備註：給媽媽 / 無香料…" placeholderTextColor="#c3b6ab" value={it.note} onChangeText={t => update(it.id, { note: t })} />
             <View style={styles.linkRow}>
-              <TouchableOpacity onPress={() => setPriceEdit({ id: it.id, val: it.price ? String(it.price.price) : '', currency: CO[it.country].cur })}><Text style={styles.linkTxt}>✏️ 自填價格</Text></TouchableOpacity>
-              {it.price?.url ? <TouchableOpacity onPress={() => openUrl(it.price.url)}><Text style={styles.linkTxt}>🔗 來源頁</Text></TouchableOpacity> : null}
+              <TouchableOpacity onPress={() => setPriceEdit({ id: it.id, val: it.actual != null ? String(it.actual) : '', currency: it.currency || CO[it.country].cur })}><Text style={styles.linkTxt}>✏️ 填實際價</Text></TouchableOpacity>
+              {it.price?.url ? <TouchableOpacity onPress={() => openUrl(sourceUrl(it))}><Text style={styles.linkTxt}>🔗 來源頁</Text></TouchableOpacity> : null}
               <TouchableOpacity onPress={() => openMore(it)}><Text style={styles.linkTxt}>🔎 看當地全部</Text></TouchableOpacity>
               {brandSite(it.name, it.country) ? <TouchableOpacity onPress={() => openUrl(brandSite(it.name, it.country))}><Text style={styles.linkTxt}>🏷️ 官網</Text></TouchableOpacity> : null}
             </View>
@@ -690,8 +717,9 @@ export default function App() {
               </TouchableOpacity>
             );
           })()}
+          <TouchableOpacity style={styles.addBoughtBtn} onPress={() => setAddBought({ country, name: '', val: '', store: '', note: '' })} activeOpacity={0.85}><Ionicons name="add-circle-outline" size={18} color={C.rose} /><Text style={styles.addBoughtTxt}>手動新增已買項目</Text></TouchableOpacity>
           {boughtItems.length === 0 && (
-            <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="receipt-outline" size={38} color={C.rose} /></View><Text style={styles.emptyBig}>還沒有花費</Text><Text style={styles.empty}>在「待買清單」把買到的打「已買」{'\n'}就會移到這裡記帳、依店家算免稅門檻</Text></View>
+            <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="receipt-outline" size={38} color={C.rose} /></View><Text style={styles.emptyBig}>還沒有花費</Text><Text style={styles.empty}>在「待買清單」把買到的打「買到了」，或上方「手動新增已買」{'\n'}就會移到這裡記帳、依店家算免稅門檻</Text></View>
           )}
           {ledger.map((g, gi) => {
             const thr = TAXFREE[g.country] || 5000;
@@ -908,9 +936,30 @@ export default function App() {
         <View style={styles.centerBackdrop}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setPriceEdit(null)} />
           <View style={styles.storeModal}>
-            <Text style={styles.sheetTitle}>自己輸入價格（{priceEdit?.currency}）</Text>
-            <TextInput style={styles.storeInput} keyboardType="numeric" value={priceEdit?.val} placeholder="當地售價，例如 1280" placeholderTextColor="#cdbdb0" autoFocus onChangeText={t => setPriceEdit(s => ({ ...s, val: t.replace(/[^0-9.]/g, '') }))} />
-            <TouchableOpacity style={[styles.storeSave, { marginTop: 16 }]} onPress={() => { const v = parseFloat(priceEdit.val) || 0; const id = priceEdit.id; setItems(prev => prev.map(it => it.id === id ? { ...it, noResult: false, price: { price: v, twd: Math.round(v * rateOf(it.country)), currency: it.price?.currency || CO[it.country].cur, title: it.price?.title || it.name, url: it.price?.url } } : it)); setPriceEdit(null); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
+            <Text style={styles.sheetTitle}>我的實際購入價（{priceEdit?.currency}）</Text>
+            <TextInput style={styles.storeInput} keyboardType="numeric" value={priceEdit?.val} placeholder="實際付的當地價，例如 1280" placeholderTextColor="#cdbdb0" autoFocus onChangeText={t => setPriceEdit(s => ({ ...s, val: t.replace(/[^0-9.]/g, '') }))} />
+            <TouchableOpacity style={[styles.storeSave, { marginTop: 16 }]} onPress={() => { const v = priceEdit.val === '' ? null : (parseFloat(priceEdit.val) || 0); const id = priceEdit.id; setItems(prev => prev.map(it => it.id === id ? { ...it, noResult: false, actual: v } : it)); setPriceEdit(null); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 記帳頁手動新增已買 */}
+      <Modal visible={!!addBought} transparent animationType="fade" onRequestClose={() => setAddBought(null)}>
+        <View style={styles.centerBackdrop}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setAddBought(null)} />
+          <View style={styles.storeModal}>
+            <Text style={styles.sheetTitle}>手動新增已買項目</Text>
+            <View style={[styles.calcSeg, { marginTop: 12 }]}>
+              {['jp', 'kr'].map(c => { const on = (addBought?.country || country) === c; return (
+                <TouchableOpacity key={c} style={[styles.calcSegBtn, on && styles.calcSegOn]} onPress={() => setAddBought(s => ({ ...s, country: c }))} activeOpacity={0.85}><Text style={[styles.calcSegTxt, on && styles.calcSegTxtOn]}>{CO[c].flag} {CO[c].label}</Text></TouchableOpacity>
+              ); })}
+            </View>
+            <TextInput style={[styles.storeInput, { marginTop: 10 }]} value={addBought?.name} placeholder="商品名稱" placeholderTextColor="#cdbdb0" onChangeText={t => setAddBought(s => ({ ...s, name: t }))} />
+            <TextInput style={[styles.storeInput, { marginTop: 10 }]} keyboardType="numeric" value={addBought?.val} placeholder={`實付當地價（${CO[(addBought?.country) || country].cur}）`} placeholderTextColor="#cdbdb0" onChangeText={t => setAddBought(s => ({ ...s, val: t.replace(/[^0-9.]/g, '') }))} />
+            <TextInput style={[styles.storeInput, { marginTop: 10 }]} value={addBought?.store} placeholder="店家（可留空）" placeholderTextColor="#cdbdb0" onChangeText={t => setAddBought(s => ({ ...s, store: t }))} />
+            <TextInput style={[styles.storeInput, { marginTop: 10 }]} value={addBought?.note} placeholder="備註（可留空）" placeholderTextColor="#cdbdb0" onChangeText={t => setAddBought(s => ({ ...s, note: t }))} />
+            <TouchableOpacity style={[styles.storeSave, { marginTop: 16 }]} onPress={saveAddBought} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>新增</Text></TouchableOpacity>
+            <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setAddBought(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1128,6 +1177,7 @@ const styles = StyleSheet.create({
   priceTagNum: { color: '#fff', fontSize: 18, fontWeight: '900', fontFamily: MONO, marginLeft: 1 },
   priceMid: { flex: 1 },
   localPrice: { color: C.inkSoft, fontSize: 13, fontWeight: '700', fontFamily: MONO },
+  actualTxt: { color: C.roseDeep, fontSize: 12.5, fontWeight: '800', marginTop: 2 },
   pickedTitle: { color: C.muted, fontSize: 11, marginTop: 2 },
   loadingTxt: { color: C.muted, fontSize: 14, marginLeft: 9, fontWeight: '600' },
   noPrice: { color: '#c2b4a8', fontSize: 13.5 },
@@ -1155,6 +1205,8 @@ const styles = StyleSheet.create({
 
   // 預算
   budgetSet: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.line, borderStyle: 'dashed', borderRadius: 16, paddingVertical: 14, marginBottom: 13 },
+  addBoughtBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.line, borderStyle: 'dashed', borderRadius: 16, paddingVertical: 13, marginBottom: 13 },
+  addBoughtTxt: { color: C.roseDeep, fontWeight: '800', fontSize: 14.5 },
   budgetSetTxt: { color: C.rose, fontWeight: '800', fontSize: 14 },
   budgetCard: { backgroundColor: C.surface, borderRadius: 18, padding: 15, marginBottom: 13, borderWidth: 1, borderColor: C.line },
   budgetTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
