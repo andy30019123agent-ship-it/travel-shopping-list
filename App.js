@@ -933,15 +933,12 @@ export default function App() {
                             <TouchableOpacity style={styles.brandRow} onPress={() => multi ? setPopExpand(s => ({ ...s, [bg.brand]: !s[bg.brand] })) : addPopular(bg.items[0])} activeOpacity={0.7} accessibilityLabel={multi ? `${bg.brand} ${bg.items.length} 個品項` : `查看 ${label}`}>
                               <View style={styles.brandInitial}><Text style={styles.brandInitialTxt}>{(label[0] || '?').toUpperCase()}</Text></View>
                               <Text style={styles.brandRowName} numberOfLines={1}>{multi ? bg.brand : label}</Text>
+                              {open ? <TouchableOpacity onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent(bg.brand + ' 熱門 推薦')}`)} hitSlop={8} activeOpacity={0.7}><Text style={styles.brandMore}>了解更多 ›</Text></TouchableOpacity> : null}
                               {multi ? <Text style={styles.brandRowCount}>{bg.items.length} 項</Text> : null}
                               <Ionicons name={multi ? (open ? 'chevron-up' : 'chevron-down') : 'chevron-forward'} size={16} color={C.muted} />
                             </TouchableOpacity>
                             {open && (
                               <View style={styles.brandRowExpand}>
-                                <View style={styles.brandExpandTop}>
-                                  <Text style={styles.brandExpandBrand}>{bg.brand}</Text>
-                                  <TouchableOpacity onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent(bg.brand + ' 熱門 推薦')}`)} hitSlop={6} activeOpacity={0.7}><Text style={styles.brandMore}>了解更多 ›</Text></TouchableOpacity>
-                                </View>
                                 <View style={styles.popWrap}>
                                   {bg.items.map(p => (
                                     <TouchableOpacity key={p.zh} style={styles.popChipLite} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`查看 ${p.zh}`}>
@@ -1205,7 +1202,7 @@ const styles = StyleSheet.create({
   suggestTerm: { color: C.muted, fontSize: 12, flex: 1, fontFamily: MONO },
 
   popCat: { color: C.inkSoft, fontSize: 13, fontWeight: '800', marginBottom: 10 },
-  brandMore: { color: C.muted, fontSize: 11.5, fontWeight: '700' },
+  brandMore: { color: C.roseDeep, fontSize: 11.5, fontWeight: '800', marginRight: 8 },
   popWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   popChipTxt: { color: C.roseDeep, fontSize: 13.5, fontWeight: '700' },
   // 品牌清單列（目錄式）
@@ -1217,8 +1214,6 @@ const styles = StyleSheet.create({
   brandRowName: { flex: 1, color: C.ink, fontSize: 14.5, fontWeight: '700' },
   brandRowCount: { color: C.muted, fontSize: 12, fontWeight: '700' },
   brandRowExpand: { backgroundColor: '#fff', paddingHorizontal: 13, paddingTop: 2, paddingBottom: 14 },
-  brandExpandTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  brandExpandBrand: { color: C.roseDeep, fontSize: 12.5, fontWeight: '900' },
   popChipLite: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fff', borderWidth: 1, borderColor: C.roseSoft, borderRadius: 999, paddingLeft: 13, paddingRight: 9, paddingVertical: 9 },
   popHint: { color: C.muted, fontSize: 12, textAlign: 'center', marginTop: 2, marginBottom: 6 },
 
