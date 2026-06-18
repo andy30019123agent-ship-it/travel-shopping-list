@@ -138,8 +138,9 @@ async function openaiChat(env, content, max_tokens = 50, model = 'gpt-4o-mini') 
 
 // AI：把中文商品名翻成當地語言的搜尋關鍵字（候選來自搜尋結果，不必多個關鍵字）
 async function guessTerms(env, item, country) {
-  // 先查對照表（含容錯），命中就不必呼叫 AI
-  const hit = dictLookup(country === 'kr' ? KR_DICT : JP_DICT, item);
+  // 輸入含「品項詞」時(品牌+品項)跳過對照表短路，交給 AI 才能同時保留品牌與品項；純品牌/綽號才用對照表
+  const hasProductType = /護唇膏|唇膏|面膜|精華|安瓶|防曬|卸妝|化妝水|化粧水|爽膚水|爽膚|乳液|乳霜|面霜|精華液|洗面|洗顏|洗顔|眼霜|身體乳|護手霜|喉糖|眼藥水|止痛|胃散|軟膏|牙膏|洗髮|潤髮|香水|粉底|氣墊|腮紅|口紅|脣膏|眼影|睫毛|遮瑕|蜜粉|爽身|凝露|凝霜|噴霧|면크림|토너|세럼|크림|마스크/.test(item);
+  const hit = hasProductType ? null : dictLookup(country === 'kr' ? KR_DICT : JP_DICT, item);
   if (hit) return [hit];
   const lang = country === 'kr' ? 'Korean' : 'Japanese';
   const hint = country === 'kr'
@@ -156,10 +157,12 @@ async function guessTerms(env, item, country) {
     `Correct obvious typos, identify the actual (popular) product, then give the single best ${lang} search keyword ` +
     `used on ${lang} shopping sites to find that product. ` +
     `${hint} Use the real local brand/product name, not a literal character-by-character translation. ` +
+    `CRITICAL: When the input contains BOTH a brand AND a product type, the keyword MUST include BOTH — the brand name PLUS the product type/line. ` +
+    `e.g. "Torriden 護唇膏" → "토리든 립밤" (brand 토리든 + product 립밤), NOT just "토리든"; "numbuzin 防曬精華" → "넘버즈인 선크림"; "DHC 卸妝油" → "DHC ディープクレンジングオイル". Never output the brand alone when a product type is given. ` +
     `Reply with ONLY the keyword — no quotes, no romaji, no explanation.\n\nProduct: ${item}`;
   const clean = s => (s || '').trim().split('\n')[0].replace(/^["「『]|["」』]$/g, '').trim();
-  // 先用 OpenAI（較準），失敗或無金鑰再退回 Workers AI llama
-  const oa = await openaiChat(env, prompt, 40);
+  // 先用 OpenAI（gpt-4.1-mini 解析品牌+品項較準），失敗或無金鑰再退回 Workers AI llama
+  const oa = await openaiChat(env, prompt, 50, 'gpt-4.1-mini');
   if (oa) return [clean(oa) || item];
   try {
     const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
@@ -514,25 +517,17 @@ export default {
     if (!item && !givenTerm) return json({ ok: false, error: 'missing item' }, 400);
 
     try {
-      // 貼網址 → 抓商品頁的標題/圖片/價格
-      let fromUrl = {};
-      if (/^https?:\/\//i.test(item)) {
-        fromUrl = await extractFromUrl(item);
-        if (fromUrl.title) item = fromUrl.title;
-      }
-      const urlExtra = { resolved: fromUrl.title || '', resolvedImage: fromUrl.image || '', resolvedPrice: fromUrl.price || 0 };
-
       if (country === 'jp') {
         const jpyRate = (await rate('JPY')) || FALLBACK_RATE.JPY;
         const translated = givenTerm ? givenTerm : (await guessTerms(env, item, country))[0];
-        return json({ ok: true, country: 'jp', raw: item, term: translated, terms: [translated], rate: jpyRate, currency: '¥', ...urlExtra });
+        return json({ ok: true, country: 'jp', raw: item, term: translated, terms: [translated], rate: jpyRate, currency: '¥' });
       }
 
       // 韓國：worker 直接查。先原文搜，不足再翻譯搜。
       const krwRate = (await rate('KRW')) || FALLBACK_RATE.KRW;
       if (givenTerm) {
         const candidates = await naverCandidates(env, [givenTerm]);
-        return json({ ok: true, country: 'kr', raw: givenTerm, term: givenTerm, terms: [givenTerm], rate: krwRate, currency: '₩', candidates, ...urlExtra });
+        return json({ ok: true, country: 'kr', raw: givenTerm, term: givenTerm, terms: [givenTerm], rate: krwRate, currency: '₩', candidates });
       }
       // 先用 OpenAI(或對照表)解析成確切商品的韓文關鍵字再搜，較精準；不足再補搜原文
       const resolved = (await guessTerms(env, item, country))[0];
@@ -543,7 +538,7 @@ export default {
         const seen = new Set(candidates.map(c => c.title.slice(0, 14)));
         for (const m of more) { if (!seen.has(m.title.slice(0, 14))) { candidates.push(m); seen.add(m.title.slice(0, 14)); } }
       }
-      return json({ ok: true, country: 'kr', raw: item, term: usedTerm, terms: [usedTerm], rate: krwRate, currency: '₩', candidates, ...urlExtra });
+      return json({ ok: true, country: 'kr', raw: item, term: usedTerm, terms: [usedTerm], rate: krwRate, currency: '₩', candidates });
     } catch (e) {
       return json({ ok: false, error: String(e.message || e) }, 502);
     }
