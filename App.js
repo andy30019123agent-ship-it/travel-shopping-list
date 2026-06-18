@@ -793,7 +793,7 @@ export default function App() {
                 <View style={styles.claimCard}>
                   <Text style={styles.claimLabel}>✨ 主打效果（廠商宣稱／社群分享）</Text>
                   <Text style={styles.claimTxt}>{scanResult.claim}</Text>
-                  <Text style={styles.claimNote}>以上為產品宣傳說法，效果因人而異</Text>
+                  <View style={styles.claimNoteRow}><Ionicons name="alert-circle" size={13} color={C.gold} /><Text style={styles.claimNoteTxt}>以上為產品宣傳說法，效果因人而異</Text></View>
                 </View>
               ) : null}
               {scanResult?.name ? (
@@ -804,7 +804,7 @@ export default function App() {
               ) : null}
               <TouchableOpacity style={[styles.storeSave, { marginTop: 16 }]} onPress={addFromScan} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>加入清單並比價</Text></TouchableOpacity>
               <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setScanResult(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
-              <Text style={styles.scanDisclaim}>僅提供產品資訊參考，不作為購物建議</Text>
+              <View style={styles.disclaimBanner}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.disclaimBannerTxt}>僅提供產品資訊參考，不作為購物建議</Text></View>
             </ScrollView>
           </View>
         </View>
@@ -836,7 +836,7 @@ export default function App() {
                 <View style={styles.claimCard}>
                   <Text style={styles.claimLabel}>✨ 主打效果（廠商宣稱／社群分享）</Text>
                   <Text style={styles.claimTxt}>{popInfo.claim}</Text>
-                  <Text style={styles.claimNote}>以上為產品宣傳說法，效果因人而異</Text>
+                  <View style={styles.claimNoteRow}><Ionicons name="alert-circle" size={13} color={C.gold} /><Text style={styles.claimNoteTxt}>以上為產品宣傳說法，效果因人而異</Text></View>
                 </View>
               ) : null}
               {popInfo?.zh ? (
@@ -847,7 +847,7 @@ export default function App() {
               ) : null}
               <TouchableOpacity style={[styles.storeSave, { marginTop: 14 }]} onPress={confirmAddPopular} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>加入清單並比價</Text></TouchableOpacity>
               <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setPopInfo(null)}><Text style={styles.endBack}>取消</Text></TouchableOpacity>
-              <Text style={styles.scanDisclaim}>僅提供產品資訊參考，不作為購物建議</Text>
+              <View style={styles.disclaimBanner}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.disclaimBannerTxt}>僅提供產品資訊參考，不作為購物建議</Text></View>
             </ScrollView>
           </View>
         </View>
@@ -865,7 +865,7 @@ export default function App() {
             <Text style={styles.scanAskHint}>AI 對這張照片把握不大，確認商品名後再查價會更準</Text>
             <TouchableOpacity style={[styles.storeSave, { marginTop: 14 }]} onPress={addFromAsk} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>是，用這個查價</Text></TouchableOpacity>
             <TouchableOpacity style={{ paddingVertical: 11 }} onPress={() => setScanAsk(null)}><Text style={styles.endBack}>不是，關閉</Text></TouchableOpacity>
-            <Text style={styles.scanDisclaim}>僅提供產品資訊參考，不作為購物建議</Text>
+            <View style={styles.disclaimBanner}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.disclaimBannerTxt}>僅提供產品資訊參考，不作為購物建議</Text></View>
           </View>
         </View>
       </Modal>
@@ -920,45 +920,39 @@ export default function App() {
               {popGroups.map(g => {
                 const bgs = groupByBrand(g.list);
                 return (
-                  <View key={g.c} style={{ marginBottom: 18 }}>
+                  <View key={g.c} style={{ marginBottom: 16 }}>
                     <Text style={styles.popCat}>{g.e} {g.c}</Text>
-                    {/* 第一層：純文字 chips。多品項品牌只顯示「品牌 ·N ⌄」，單品項顯示「品牌 品名」 */}
-                    <View style={styles.popWrap}>
+                    {/* 第一層：品牌清單列。多品項→點開手風琴；單品項→直接開介紹卡 */}
+                    <View style={styles.brandList}>
                       {bgs.map((bg, bi) => {
-                        if (!(bg.brand && bg.items.length >= 2)) {
-                          return bg.items.map(p => (
-                            <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`查看 ${p.zh}`}>
-                              <Text style={styles.popChipTxt}>{p.zh}</Text>
-                            </TouchableOpacity>
-                          ));
-                        }
-                        const open = !!popExpand[bg.brand];
+                        const multi = bg.brand && bg.items.length >= 2;
+                        const label = (bg.brand || bg.items[0].zh || '').trim();
+                        const open = multi && !!popExpand[bg.brand];
                         return (
-                          <TouchableOpacity key={bg.brand} style={[styles.brandChip, open && styles.brandChipOn]} onPress={() => setPopExpand(s => ({ ...s, [bg.brand]: !s[bg.brand] }))} activeOpacity={0.8} accessibilityLabel={`${bg.brand} ${bg.items.length} 個品項`}>
-                            <Text style={[styles.brandChipTxt, open && styles.brandChipTxtOn]}>{bg.brand}</Text>
-                            <Text style={[styles.brandChipCount, open && styles.brandChipCountOn]}>·{bg.items.length}</Text>
-                            <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={13} color={open ? '#fff' : C.roseDeep} />
-                          </TouchableOpacity>
+                          <View key={bg.brand || ('s' + bi)} style={bi > 0 ? styles.brandRowDiv : null}>
+                            <TouchableOpacity style={styles.brandRow} onPress={() => multi ? setPopExpand(s => ({ ...s, [bg.brand]: !s[bg.brand] })) : addPopular(bg.items[0])} activeOpacity={0.7} accessibilityLabel={multi ? `${bg.brand} ${bg.items.length} 個品項` : `查看 ${label}`}>
+                              <View style={styles.brandInitial}><Text style={styles.brandInitialTxt}>{(label[0] || '?').toUpperCase()}</Text></View>
+                              <Text style={styles.brandRowName} numberOfLines={1}>{multi ? bg.brand : label}</Text>
+                              {multi ? <Text style={styles.brandRowCount}>{bg.items.length} 項</Text> : null}
+                              <Ionicons name={multi ? (open ? 'chevron-up' : 'chevron-down') : 'chevron-forward'} size={16} color={C.muted} />
+                            </TouchableOpacity>
+                            {open && (
+                              <View style={styles.brandRowExpand}>
+                                <View style={styles.popWrap}>
+                                  {bg.items.map(p => (
+                                    <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`查看 ${p.zh}`}>
+                                      <Text style={styles.popChipTxt}>{stripBrand(p.zh, bg.brand)}</Text>
+                                      <Ionicons name="add" size={14} color={C.roseDeep} />
+                                    </TouchableOpacity>
+                                  ))}
+                                </View>
+                                <TouchableOpacity onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent(bg.brand + ' 熱門 推薦')}`)} hitSlop={6} activeOpacity={0.7} style={{ alignSelf: 'flex-end', marginTop: 8 }}><Text style={styles.brandMore}>了解更多 ›</Text></TouchableOpacity>
+                              </View>
+                            )}
+                          </View>
                         );
                       })}
                     </View>
-                    {/* 展開的品牌→品項區（手風琴） */}
-                    {bgs.filter(bg => bg.brand && bg.items.length >= 2 && popExpand[bg.brand]).map(bg => (
-                      <View key={'ex' + bg.brand} style={styles.brandExpand}>
-                        <View style={styles.brandExpandHead}>
-                          <Text style={styles.brandExpandName}>{bg.brand}</Text>
-                          <TouchableOpacity onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent(bg.brand + ' 熱門 推薦')}`)} hitSlop={8} activeOpacity={0.7}><Text style={styles.brandMore}>了解更多 ›</Text></TouchableOpacity>
-                        </View>
-                        <View style={styles.popWrap}>
-                          {bg.items.map(p => (
-                            <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`查看 ${p.zh}`}>
-                              <Text style={styles.popChipTxt}>{stripBrand(p.zh, bg.brand)}</Text>
-                              <Ionicons name="add" size={14} color={C.roseDeep} />
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      </View>
-                    ))}
                   </View>
                 );
               })}
@@ -1212,16 +1206,15 @@ const styles = StyleSheet.create({
   popWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   popChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.roseSoft, borderRadius: 999, paddingLeft: 14, paddingRight: 10, paddingVertical: 9 },
   popChipTxt: { color: C.roseDeep, fontSize: 13.5, fontWeight: '700' },
-  // 手風琴：品牌 chip（多品項收合）
-  brandChip: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#fff', borderWidth: 1.2, borderColor: C.roseSoft, borderRadius: 999, paddingLeft: 14, paddingRight: 9, paddingVertical: 9 },
-  brandChipOn: { backgroundColor: C.rose, borderColor: C.rose },
-  brandChipTxt: { color: C.roseDeep, fontSize: 13.5, fontWeight: '800' },
-  brandChipTxtOn: { color: '#fff' },
-  brandChipCount: { color: C.muted, fontSize: 12, fontWeight: '700', marginRight: 1 },
-  brandChipCountOn: { color: 'rgba(255,255,255,0.85)' },
-  brandExpand: { backgroundColor: '#FBF3E4', borderRadius: 14, padding: 12, marginTop: 10, marginBottom: 4 },
-  brandExpandHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 },
-  brandExpandName: { color: C.roseDeep, fontSize: 13.5, fontWeight: '900' },
+  // 品牌清單列（目錄式）
+  brandList: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: C.line, overflow: 'hidden' },
+  brandRowDiv: { borderTopWidth: 1, borderTopColor: C.line },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 13, paddingHorizontal: 13 },
+  brandInitial: { width: 30, height: 30, borderRadius: 9, backgroundColor: C.roseSoft, alignItems: 'center', justifyContent: 'center' },
+  brandInitialTxt: { color: C.roseDeep, fontSize: 14, fontWeight: '900' },
+  brandRowName: { flex: 1, color: C.ink, fontSize: 14.5, fontWeight: '700' },
+  brandRowCount: { color: C.muted, fontSize: 12, fontWeight: '700' },
+  brandRowExpand: { backgroundColor: '#FBF3E4', paddingHorizontal: 13, paddingTop: 4, paddingBottom: 13 },
   popHint: { color: C.muted, fontSize: 12, textAlign: 'center', marginTop: 2, marginBottom: 6 },
 
   list: { flex: 1, paddingHorizontal: 18, marginTop: 14 },
@@ -1328,10 +1321,12 @@ const styles = StyleSheet.create({
   claimCard: { backgroundColor: C.roseSoft, borderRadius: 14, padding: 13, marginTop: 15 },
   claimLabel: { color: C.roseDeep, fontSize: 12.5, fontWeight: '900', marginBottom: 7 },
   claimTxt: { color: C.ink, fontSize: 13.5, lineHeight: 20.5 },
-  claimNote: { color: C.muted, fontSize: 10.5, lineHeight: 15, marginTop: 9 },
+  claimNoteRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 11, backgroundColor: '#fff', borderRadius: 9, paddingVertical: 7, paddingHorizontal: 9 },
+  claimNoteTxt: { flex: 1, color: '#9A6B1F', fontSize: 11.5, fontWeight: '700', lineHeight: 16 },
   scanReviewBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16, paddingVertical: 11, borderRadius: 12, backgroundColor: C.bg },
   scanReviewTxt: { color: C.inkSoft, fontWeight: '700', fontSize: 13 },
-  scanDisclaim: { color: C.muted, fontSize: 10.5, textAlign: 'center', marginTop: 10 },
+  disclaimBanner: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#FCF3E0', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 12, marginTop: 14, borderLeftWidth: 3, borderLeftColor: C.gold },
+  disclaimBannerTxt: { flex: 1, color: '#8A6420', fontSize: 12, fontWeight: '700', lineHeight: 16 },
   popInfoEmoji: { fontSize: 40, textAlign: 'center', marginTop: 8 },
   popInfoImg: { width: '100%', height: 168, borderRadius: 16, backgroundColor: C.bg },
   popInfoName: { fontSize: 19, fontWeight: '900', color: C.ink, textAlign: 'center', marginTop: 10, lineHeight: 25 },
