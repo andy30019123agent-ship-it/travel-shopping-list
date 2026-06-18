@@ -16,7 +16,6 @@ const SETTINGS_KEY = 'travel-shopping-settings-v1';
 const WORKER_URL = 'https://menshui-price.andy30019123agent.workers.dev';
 const RAKUTEN_APP_ID = '3ec6041d-d772-4a05-861a-9d15ec64dafa';
 const RAKUTEN_ACCESS_KEY = 'pk_SuWs3ZCwNcFZS14BLH8QbOcDkOOBMKlyDRp7L3a2ANN';
-const TAXFREE = { jp: 5000, kr: 15000 }; // 參考免稅/退稅門檻（當地幣別）
 
 const CO = {
   jp: { flag: '🇯🇵', label: '日本', cur: '¥', curLabel: '日圓' },
@@ -45,6 +44,16 @@ const enc = encodeURIComponent;
 const MONO = Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monospace', ios: 'Menlo', android: 'monospace', default: 'monospace' });
 // 移除 react-native-web 點擊輸入框時的瀏覽器預設藍色外框
 const NO_OUTLINE = Platform.OS === 'web' ? { outlineStyle: 'none', outlineWidth: 0 } : {};
+
+// 購物點地圖深連結：有貼專屬連結就直接用；否則用店名搜尋（韓國 Naver、日本 Google）
+function spotMapUrl(name, country, explicit) {
+  if (explicit && explicit.trim()) return explicit.trim();
+  const q = enc((name || '').trim());
+  if (!q) return '';
+  return country === 'kr'
+    ? `https://map.naver.com/p/search/${q}`
+    : `https://www.google.com/maps/search/?api=1&query=${q}`;
+}
 
 function dedupeBy(arr, keyFn) {
   const seen = new Set(); const out = [];
@@ -279,6 +288,8 @@ export default function App() {
   const [tab, setTab] = useState('list');
   const [stores, setStores] = useState([]); // 記住的常用店家
   const [storeEdit, setStoreEdit] = useState(null); // 正在編輯店家的 item id
+  const [spotLinks, setSpotLinks] = useState({}); // 購物點名稱 → 地圖連結
+  const [wishView, setWishView] = useState('all'); // 待買清單檢視：all | spot
   const [budget, setBudget] = useState(0); // 整趟預算(台幣)
   const [budgetEdit, setBudgetEdit] = useState(null);
   const [priceEdit, setPriceEdit] = useState(null); // 自填價格 {id, val, currency}
@@ -307,7 +318,7 @@ export default function App() {
 
   useEffect(() => {
     AsyncStorage.getItem(STORE_KEY).then(r => { if (r) setItems(JSON.parse(r)); setLoaded(true); });
-    AsyncStorage.getItem(SETTINGS_KEY).then(r => { const s = r ? JSON.parse(r) : {}; if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.stores) setStores(s.stores); if (s.budget) setBudget(s.budget); if (s.aiTipSeen) setAiTipSeen(true); if (!s.onboardSeen) setOnboard(true); setSettingsLoaded(true); });
+    AsyncStorage.getItem(SETTINGS_KEY).then(r => { const s = r ? JSON.parse(r) : {}; if (s.country) setCountry(s.country); if (s.sort) setSort(s.sort); if (s.stores) setStores(s.stores); if (s.spotLinks) setSpotLinks(s.spotLinks); if (s.budget) setBudget(s.budget); if (s.aiTipSeen) setAiTipSeen(true); if (!s.onboardSeen) setOnboard(true); setSettingsLoaded(true); });
     fetch(`${WORKER_URL}/rate`).then(r => r.json()).then(d => { if (d.ok) setRates({ jpy: d.jpy, krw: d.krw }); }).catch(() => {});
   }, []);
   useEffect(() => { fetch(`${WORKER_URL}/popular`).then(r => r.json()).then(d => { if (d.ok) setRemotePopular({ jp: d.jp || [], kr: d.kr || [] }); }).catch(() => {}); }, []);
@@ -332,7 +343,7 @@ export default function App() {
       }).catch(() => setPicker(p => p ? { ...p, translating: false } : p));
   }, [picker]);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
-  useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, budget, onboardSeen: !onboard, aiTipSeen })); }, [country, sort, stores, budget, onboard, aiTipSeen, settingsLoaded]);
+  useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, spotLinks, budget, onboardSeen: !onboard, aiTipSeen })); }, [country, sort, stores, spotLinks, budget, onboard, aiTipSeen, settingsLoaded]);
 
   const rateOf = c => (c === 'kr' ? rates.krw : rates.jpy);
   const update = (id, patch) => setItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
@@ -503,6 +514,16 @@ export default function App() {
     return items.filter(i => i.status === 'todo').sort(sorter);
   }, [items, sort]);
   const boughtItems = useMemo(() => items.filter(i => i.status === 'bought'), [items]);
+  // 依購物點分組（待買清單「依購物點」檢視）：有指定的在前、未指定排最後
+  const todoSpotGroups = useMemo(() => {
+    const groups = {};
+    for (const it of todoItems) {
+      const key = (it.store || '').trim() || '__none__';
+      if (!groups[key]) groups[key] = { store: key === '__none__' ? '' : key, items: [], country: it.country };
+      groups[key].items.push(it);
+    }
+    return Object.values(groups).sort((a, b) => (a.store ? 0 : 1) - (b.store ? 0 : 1) || a.store.localeCompare(b.store, 'ja'));
+  }, [todoItems]);
 
   // 每件「有效當地單價」：優先用實際購入價，否則用參考區間中位數，再否則用挑到的那筆
   const effLocal = (it) => it.actual != null ? it.actual : (it.range ? Math.round((it.range.min + it.range.max) / 2) : (it.price ? it.price.price : 0));
@@ -592,6 +613,18 @@ export default function App() {
               </View>
             </View>
           </View>
+        </View>
+
+        <View style={styles.spotRow}>
+          <TouchableOpacity style={styles.spotRowMain} activeOpacity={0.7} onPress={() => setStoreEdit({ ids: [it.id], val: it.store || '', link: spotLinks[(it.store || '').trim()] || '', country: it.country })} accessibilityLabel="設定預計購物點">
+            <Ionicons name="location-outline" size={14} color={it.store ? C.roseDeep : C.muted} />
+            <Text style={[styles.spotRowTxt, it.store && styles.spotRowTxtOn]} numberOfLines={1}>{it.store || '設定預計購物點'}</Text>
+          </TouchableOpacity>
+          {it.store ? (
+            <TouchableOpacity style={styles.spotNavBtn} hitSlop={6} onPress={() => openUrl(spotMapUrl(it.store, it.country, spotLinks[(it.store || '').trim()]))} accessibilityLabel="開地圖導航">
+              <Ionicons name="navigate" size={13} color={C.roseDeep} /><Text style={styles.spotNavTxt}>導航</Text>
+            </TouchableOpacity>
+          ) : <Ionicons name="chevron-forward" size={15} color={C.muted} />}
         </View>
 
         {isOpen && (
@@ -720,11 +753,38 @@ export default function App() {
             {todoItems.length > 0 && <TouchableOpacity style={[styles.toolChip, styles.toolChipPrimary]} onPress={queryAll} activeOpacity={0.85}><Ionicons name="search" size={14} color="#fff" /><Text style={[styles.toolChipTxt, { color: '#fff' }]}>全部查價</Text></TouchableOpacity>}
           </View>
 
+          {todoItems.length > 0 && (
+            <View style={styles.viewSeg}>
+              {[['all', '全部', 'reorder-three-outline'], ['spot', '依購物點', 'location-outline']].map(([k, label, icon]) => (
+                <TouchableOpacity key={k} style={[styles.viewSegBtn, wishView === k && styles.viewSegOn]} onPress={() => setWishView(k)} activeOpacity={0.85}>
+                  <Ionicons name={icon} size={14} color={wishView === k ? C.roseDeep : C.muted} />
+                  <Text style={[styles.viewSegTxt, wishView === k && styles.viewSegTxtOn]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
             {todoItems.length === 0 && (
               <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="bag-handle-outline" size={40} color={C.rose} /></View><Text style={styles.emptyBig}>清單還是空的</Text><Text style={styles.empty}>打上商品名稱，或用右上「AI 產品辨識」拍照{'\n'}加好後按「查價」，幫你比當地價、即時換算台幣 💰</Text></View>
             )}
-            {todoCards}
+            {wishView === 'all' ? todoCards : todoSpotGroups.map((g, gi) => (
+              <View key={'sg' + gi} style={styles.spotGroup}>
+                <View style={styles.spotGroupHead}>
+                  <View style={styles.spotGroupNameWrap}>
+                    <Ionicons name="location" size={15} color={g.store ? C.roseDeep : C.muted} />
+                    <Text style={styles.spotGroupName} numberOfLines={1}>{g.store || '未指定購物點'}</Text>
+                    <Text style={styles.spotGroupCount}>{g.items.length}</Text>
+                  </View>
+                  {g.store ? (
+                    <TouchableOpacity style={styles.spotGroupNav} onPress={() => openUrl(spotMapUrl(g.store, g.country, spotLinks[g.store]))} activeOpacity={0.85} accessibilityLabel="開地圖導航">
+                      <Ionicons name="navigate" size={13} color="#fff" /><Text style={styles.spotGroupNavTxt}>導航</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+                {g.items.map(renderTodo)}
+              </View>
+            ))}
             <TouchableOpacity style={styles.guideLink} onPress={() => setGuide(true)} activeOpacity={0.7}><Ionicons name="help-circle-outline" size={15} color={C.muted} /><Text style={styles.guideLinkTxt}>使用說明</Text></TouchableOpacity>
           </ScrollView>
         </>
@@ -750,32 +810,21 @@ export default function App() {
           })()}
           <TouchableOpacity style={styles.addBoughtBtn} onPress={() => setAddBought({ country, name: '', val: '', store: '', note: '' })} activeOpacity={0.85}><Ionicons name="add-circle-outline" size={18} color={C.rose} /><Text style={styles.addBoughtTxt}>手動新增已買項目</Text></TouchableOpacity>
           {boughtItems.length === 0 && (
-            <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="receipt-outline" size={38} color={C.rose} /></View><Text style={styles.emptyBig}>還沒有花費</Text><Text style={styles.empty}>在「待買清單」把買到的打「買到了」，或上方「手動新增已買」{'\n'}就會移到這裡記帳、依店家算免稅門檻</Text></View>
+            <View style={styles.emptyWrap}><View style={styles.emptyIcon}><Ionicons name="receipt-outline" size={38} color={C.rose} /></View><Text style={styles.emptyBig}>還沒有花費</Text><Text style={styles.empty}>在「待買清單」把買到的打「買到了」，或上方「手動新增已買」{'\n'}就會移到這裡記帳、自動依店家分組整理</Text></View>
           )}
-          {ledger.map((g, gi) => {
-            const thr = TAXFREE[g.country] || 5000;
-            const reached = g.local >= thr;
-            const left = Math.max(0, thr - g.local);
-            return (
-              <View key={gi} style={styles.storeGroup}>
-                <View style={styles.storeHead}>
-                  <TouchableOpacity style={styles.storeNameBtn} onPress={() => setStoreEdit({ ids: g.items.map(i => i.id), val: g.store })} activeOpacity={0.7}>
-                    <Ionicons name="storefront-outline" size={15} color={C.inkSoft} />
-                    <Text style={styles.storeName}>{g.store || '未指定店家'}</Text>
-                    <Ionicons name="create-outline" size={13} color={C.muted} />
-                  </TouchableOpacity>
-                  <Text style={styles.storeTwd}>NT${fmt(g.twd)}</Text>
-                </View>
-                <View style={[styles.taxBar, reached && styles.taxBarOk]}>
-                  <Ionicons name={reached ? 'checkmark-circle' : 'information-circle-outline'} size={15} color={reached ? C.green : C.gold} />
-                  <Text style={[styles.taxTxt, reached && { color: C.green }]}>
-                    {reached ? `已達免稅門檻（${CO[g.country].cur}${fmt(thr)}）` : `距免稅門檻還差 ${CO[g.country].cur}${fmt(left)}（滿 ${CO[g.country].cur}${fmt(thr)}）`}
-                  </Text>
-                </View>
-                {g.items.map(renderBought)}
+          {ledger.map((g, gi) => (
+            <View key={gi} style={styles.storeGroup}>
+              <View style={styles.storeHead}>
+                <TouchableOpacity style={styles.storeNameBtn} onPress={() => setStoreEdit({ ids: g.items.map(i => i.id), val: g.store, link: spotLinks[(g.store || '').trim()] || '', country: g.country })} activeOpacity={0.7}>
+                  <Ionicons name="storefront-outline" size={15} color={C.inkSoft} />
+                  <Text style={styles.storeName}>{g.store || '未指定店家'}</Text>
+                  <Ionicons name="create-outline" size={13} color={C.muted} />
+                </TouchableOpacity>
+                <Text style={styles.storeTwd}>NT${fmt(g.twd)}</Text>
               </View>
-            );
-          })}
+              {g.items.map(renderBought)}
+            </View>
+          ))}
           {boughtItems.length > 0 && (
             <TouchableOpacity style={styles.endTripBtn} onPress={() => setEndTrip('summary')} activeOpacity={0.85}>
               <Ionicons name="flag" size={16} color={C.rose} /><Text style={styles.endTripTxt}>結束這趟旅行・看結算</Text>
@@ -977,12 +1026,21 @@ export default function App() {
         <View style={[styles.centerBackdrop, { paddingBottom: kbInset + 24 }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setStoreEdit(null)} />
           <View style={styles.storeModal}>
-            <Text style={styles.sheetTitle}>這批在哪家買？</Text>
+            <Text style={styles.sheetTitle}>預計在哪家買？</Text>
             <TextInput style={styles.storeInput} value={storeEdit?.val} placeholder="店家名稱，例如 唐吉訶德 梅田店" placeholderTextColor="#cdbdb0" autoFocus onChangeText={t => setStoreEdit(s => ({ ...s, val: t }))} />
             {stores.length > 0 && (
-              <View style={styles.storeChips}>{stores.map(s => <TouchableOpacity key={s} style={styles.storeChip} onPress={() => setStoreEdit(e => ({ ...e, val: s }))}><Text style={styles.storeChipTxt}>{s}</Text></TouchableOpacity>)}</View>
+              <View style={styles.storeChips}>{stores.map(s => <TouchableOpacity key={s} style={styles.storeChip} onPress={() => setStoreEdit(e => ({ ...e, val: s, link: spotLinks[s] || e.link }))}><Text style={styles.storeChipTxt}>{s}</Text></TouchableOpacity>)}</View>
             )}
-            <TouchableOpacity style={styles.storeSave} onPress={() => { const v = (storeEdit.val || '').trim(); setItems(prev => prev.map(it => storeEdit.ids.includes(it.id) ? { ...it, store: v } : it)); rememberStore(v); setStoreEdit(null); }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
+            <Text style={styles.scanLabel}>地圖連結（選填）</Text>
+            <TextInput style={styles.storeInput} value={storeEdit?.link} placeholder="貼上 Google／Naver 地圖連結" placeholderTextColor="#cdbdb0" autoCapitalize="none" onChangeText={t => setStoreEdit(s => ({ ...s, link: t }))} />
+            <Text style={styles.spotHint}>留空也行：到當地會用店名自動搜尋（{storeEdit?.country === 'kr' ? 'Naver' : 'Google'} 地圖）</Text>
+            <TouchableOpacity style={styles.storeSave} onPress={() => {
+              const v = (storeEdit.val || '').trim();
+              const link = (storeEdit.link || '').trim();
+              setItems(prev => prev.map(it => storeEdit.ids.includes(it.id) ? { ...it, store: v } : it));
+              if (v) { rememberStore(v); setSpotLinks(prev => { const n = { ...prev }; if (link) n[v] = link; else delete n[v]; return n; }); }
+              setStoreEdit(null);
+            }} activeOpacity={0.85}><Text style={styles.storeSaveTxt}>儲存</Text></TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1117,7 +1175,7 @@ export default function App() {
           <View style={styles.onboardCard}>
             <Text style={styles.onboardEmoji}>🛍️</Text>
             <Text style={styles.onboardTitle}>歡迎用「免稅不是免費」</Text>
-            {[['add', '1. 加入想買的', '打上商品名稱，或用右上「AI 產品辨識」拍照'], ['search', '2. 查當地價', '按「查價」自動換算台幣、挑正確商品'], ['wallet', '3. 買到就記帳', '打「買到了」移到記帳頁，依店家算免稅門檻']].map(([ic, t, d]) => (
+            {[['add', '1. 加入想買的', '打上商品名稱，或用右上「AI 產品辨識」拍照'], ['search', '2. 查當地價', '按「查價」自動換算台幣、挑正確商品'], ['wallet', '3. 買到就記帳', '打「買到了」移到記帳頁，依店家分組整理花費']].map(([ic, t, d]) => (
               <View key={t} style={styles.onboardRow}>
                 <View style={styles.onboardIcon}><Ionicons name={ic} size={18} color={C.rose} /></View>
                 <View style={{ flex: 1 }}><Text style={styles.onboardRowT}>{t}</Text><Text style={styles.onboardRowD}>{d}</Text></View>
@@ -1145,7 +1203,8 @@ export default function App() {
                 ['swap-horizontal-outline', '更換・重搜', '價格旁的 ⇄ 可重開候選清單更換；找不到可改關鍵字重搜，或開官網看全部。'],
                 ['flag-outline', '切換國家', '頂部可切日本／韓國，每筆商品也能單獨切換國家。'],
                 ['create-outline', '自填價格', '沒查到也沒關係，點價格或「自填價格」手動輸入當地售價。'],
-                ['wallet-outline', '記帳', '買到的按「買到了」移到記帳頁，依店家分組並顯示免稅門檻進度。'],
+                ['location-outline', '預計購物點', '每筆可設「預計購物點」，清單切「依購物點」就把同一家店的商品聚在一起；填好店名或貼上地圖連結，到當地一鍵開 Google／Naver 地圖導航。'],
+                ['wallet-outline', '記帳', '買到的按「買到了」移到記帳頁，依店家分組整理花費。'],
                 ['cash-outline', '預算與結算', '在記帳頁設整趟預算，用綠／橘／紅進度條提醒；結束旅程可一鍵結算。'],
                 ['calculator-outline', '匯率計算機', '右上計算機可快速換算當地幣與台幣。'],
               ].map(([ic, t, d]) => (
@@ -1154,7 +1213,7 @@ export default function App() {
                   <View style={{ flex: 1 }}><Text style={styles.onboardRowT}>{t}</Text><Text style={styles.onboardRowD}>{d}</Text></View>
                 </View>
               ))}
-              <Text style={styles.guideFoot}>免稅門檻（同店合計）：日本未稅 ¥5,000、韓國 ₩15,000 達標可退稅，金額僅供參考。價格與資訊由 AI 與公開資料提供，僅供參考、不作為購物建議。</Text>
+              <Text style={styles.guideFoot}>價格與資訊由 AI 與公開資料提供，僅供參考、不作為購物建議。</Text>
             </ScrollView>
             <TouchableOpacity style={styles.onboardBtn} onPress={() => setGuide(false)} activeOpacity={0.85}><Text style={styles.onboardBtnTxt}>知道了</Text></TouchableOpacity>
           </View>
@@ -1309,9 +1368,25 @@ const styles = StyleSheet.create({
   storeNameBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   storeName: { color: C.ink, fontSize: 15, fontWeight: '800' },
   storeTwd: { color: C.rose, fontSize: 16, fontWeight: '900', fontFamily: MONO },
-  taxBar: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBF3E4', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, marginTop: 9 },
-  taxBarOk: { backgroundColor: '#E9F5EE' },
-  taxTxt: { color: C.gold, fontSize: 12, fontWeight: '700', flex: 1 },
+  spotRow: { flexDirection: 'row', alignItems: 'center', marginTop: 11, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 10, gap: 6 },
+  spotRowMain: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  spotRowTxt: { color: C.muted, fontSize: 13, fontWeight: '700', flex: 1 },
+  spotRowTxtOn: { color: C.ink },
+  spotNavBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: C.roseSoft, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
+  spotNavTxt: { color: C.roseDeep, fontSize: 12, fontWeight: '800' },
+  viewSeg: { flexDirection: 'row', gap: 8, paddingHorizontal: 18, marginTop: 11 },
+  viewSegBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: C.surface, borderWidth: 1.5, borderColor: C.line },
+  viewSegOn: { backgroundColor: C.roseSoft, borderColor: C.rose },
+  viewSegTxt: { color: C.muted, fontSize: 12.5, fontWeight: '700' },
+  viewSegTxtOn: { color: C.roseDeep },
+  spotGroup: { marginBottom: 4 },
+  spotGroupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 10, paddingHorizontal: 2, gap: 8 },
+  spotGroupNameWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  spotGroupName: { color: C.ink, fontSize: 15, fontWeight: '800', flexShrink: 1 },
+  spotGroupCount: { color: C.inkSoft, fontSize: 11.5, fontWeight: '800', backgroundColor: C.bg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
+  spotGroupNav: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.rose, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
+  spotGroupNavTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  spotHint: { color: C.muted, fontSize: 11.5, marginTop: 8, lineHeight: 16 },
   ledgerItem: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 11 },
   ledgerImg: { width: 44, height: 44, borderRadius: 10, backgroundColor: C.bg },
   ledgerName: { color: C.ink, fontSize: 14, fontWeight: '700' },

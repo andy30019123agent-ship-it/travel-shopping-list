@@ -28,6 +28,9 @@
     },
     "experiments": {
       "baseUrl": "/travel-shopping-list"
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }
