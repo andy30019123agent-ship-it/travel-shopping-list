@@ -352,13 +352,14 @@ export default function App() {
     if (q.length < 2) { setStoreEdit(s => (s && s.results && s.results.length ? { ...s, results: [], searching: false } : s)); return; }
     let cancelled = false;
     setStoreEdit(s => s ? { ...s, searching: true } : s);
+    const prov = storeEdit.provider || (storeEdit.country === 'kr' ? 'naver' : 'google');
     const t = setTimeout(() => {
-      fetch(`${WORKER_URL}/places?q=${encodeURIComponent(q)}&country=${storeEdit.country || 'jp'}`)
+      fetch(`${WORKER_URL}/places?q=${encodeURIComponent(q)}&country=${storeEdit.country || 'jp'}&provider=${prov}`)
         .then(r => r.json()).then(d => { if (!cancelled) setStoreEdit(s => s ? { ...s, results: d.results || [], searching: false } : s); })
         .catch(() => { if (!cancelled) setStoreEdit(s => s ? { ...s, searching: false } : s); });
     }, 350);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [storeEdit?.val, storeEdit?.place]);
+  }, [storeEdit?.val, storeEdit?.place, storeEdit?.provider]);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
   useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, spotLinks, budget, onboardSeen: !onboard, aiTipSeen })); }, [country, sort, stores, spotLinks, budget, onboard, aiTipSeen, settingsLoaded]);
 
@@ -1055,9 +1056,24 @@ export default function App() {
           <View style={styles.storeModal}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: 460 }}>
             <Text style={styles.sheetTitle}>預計在哪家買？</Text>
+
+            <Text style={styles.scanLabel}>① 先選地圖</Text>
+            <View style={styles.mapSeg}>
+              {[['google', 'Google 地圖'], ['naver', 'Naver 地圖']].map(([k, label]) => {
+                const on = (storeEdit?.provider || (storeEdit?.country === 'kr' ? 'naver' : 'google')) === k;
+                return (
+                  <TouchableOpacity key={k} style={[styles.mapSegBtn, on && styles.mapSegOn]} onPress={() => setStoreEdit(s => ({ ...s, provider: k, results: [] }))} activeOpacity={0.85}>
+                    <Ionicons name="map-outline" size={14} color={on ? C.roseDeep : C.muted} />
+                    <Text style={[styles.mapSegTxt, on && styles.mapSegTxtOn]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.scanLabel}>② 搜尋店家</Text>
             <View style={styles.spotSearchWrap}>
               <Ionicons name="search" size={16} color={C.muted} />
-              <TextInput style={styles.spotSearchInput} value={storeEdit?.val} placeholder="搜尋店家，例如 olive young 明洞" placeholderTextColor="#cdbdb0" autoFocus autoCapitalize="none" onChangeText={t => setStoreEdit(s => ({ ...s, val: t, place: null }))} />
+              <TextInput style={styles.spotSearchInput} value={storeEdit?.val} placeholder={(storeEdit?.provider || (storeEdit?.country === 'kr' ? 'naver' : 'google')) === 'naver' ? '韓國店家，例如 올리브영 명동' : '店家名稱，例如 唐吉訶德 大阪'} placeholderTextColor="#cdbdb0" autoFocus autoCapitalize="none" onChangeText={t => setStoreEdit(s => ({ ...s, val: t, place: null }))} />
               {storeEdit?.searching ? <ActivityIndicator size="small" color={C.rose} /> : (storeEdit?.val ? <TouchableOpacity onPress={() => setStoreEdit(s => ({ ...s, val: '', place: null, results: [] }))} hitSlop={8} accessibilityLabel="清除"><Ionicons name="close-circle" size={17} color={C.muted} /></TouchableOpacity> : null)}
             </View>
 
@@ -1077,12 +1093,14 @@ export default function App() {
                   <TouchableOpacity key={i} style={[styles.spotResult, i > 0 && styles.spotResultDiv]} activeOpacity={0.7} onPress={() => setStoreEdit(s => ({ ...s, val: r.name, place: { address: r.address, lat: r.lat, lon: r.lon }, results: [] }))}>
                     <Ionicons name="location-outline" size={15} color={C.rose} />
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.spotResultName} numberOfLines={1}>{r.name}</Text>
+                      <Text style={styles.spotResultName} numberOfLines={1}>{r.name}{r.rating ? <Text style={styles.spotResultStar}> ★{r.rating}</Text> : null}</Text>
                       {r.address ? <Text style={styles.spotResultAddr} numberOfLines={1}>{r.address}</Text> : null}
                     </View>
                   </TouchableOpacity>
                 ))}
               </View>
+            ) : ((storeEdit?.val || '').trim().length >= 2 && !storeEdit?.searching) ? (
+              <Text style={styles.spotEmpty}>找不到符合的店家，換個關鍵字或地圖試試{(storeEdit?.provider || (storeEdit?.country === 'kr' ? 'naver' : 'google')) === 'naver' ? '（Naver 只收錄韓國店）' : ''}</Text>
             ) : null}
 
             {stores.length > 0 && (
@@ -1091,24 +1109,6 @@ export default function App() {
                 <View style={styles.storeChips}>{stores.map(s => <TouchableOpacity key={s} style={styles.storeChip} onPress={() => { const sp = spotLinks[s]; setStoreEdit(e => ({ ...e, val: s, place: (sp && typeof sp === 'object' && sp.lat != null) ? { address: sp.address, lat: sp.lat, lon: sp.lon } : null, provider: (sp && sp.provider) || e.provider, results: [] })); }}><Text style={styles.storeChipTxt}>{s}</Text></TouchableOpacity>)}</View>
               </>
             )}
-
-            <Text style={styles.scanLabel}>點地圖直接搜這家（也設為導航用）</Text>
-            <View style={styles.mapSeg}>
-              {[['google', 'Google 地圖'], ['naver', 'Naver 地圖']].map(([k, label]) => {
-                const on = (storeEdit?.provider || (storeEdit?.country === 'kr' ? 'naver' : 'google')) === k;
-                return (
-                  <TouchableOpacity key={k} style={[styles.mapSegBtn, on && styles.mapSegOn]} onPress={() => {
-                    setStoreEdit(s => ({ ...s, provider: k }));
-                    const v = (storeEdit?.val || '').trim();
-                    if (v) openUrl(spotMapUrl(v, storeEdit?.country, { provider: k, ...(storeEdit?.place || {}) }));
-                  }} activeOpacity={0.85}>
-                    <Ionicons name="map-outline" size={14} color={on ? C.roseDeep : C.muted} />
-                    <Text style={[styles.mapSegTxt, on && styles.mapSegTxtOn]}>{label}</Text>
-                    <Ionicons name="open-outline" size={12} color={on ? C.roseDeep : C.muted} />
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
             </ScrollView>
 
             <TouchableOpacity style={[styles.storeSave, { marginTop: 14 }]} onPress={() => {
@@ -1469,7 +1469,9 @@ const styles = StyleSheet.create({
   spotResult: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 11, backgroundColor: C.surface },
   spotResultDiv: { borderTopWidth: 1, borderTopColor: C.line },
   spotResultName: { color: C.ink, fontSize: 14.5, fontWeight: '700' },
+  spotResultStar: { color: C.gold, fontSize: 12.5, fontWeight: '800' },
   spotResultAddr: { color: C.muted, fontSize: 12, marginTop: 1 },
+  spotEmpty: { color: C.muted, fontSize: 12.5, marginTop: 10, lineHeight: 18 },
   spotBound: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: C.roseSoft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, marginTop: 8 },
   spotBoundName: { color: C.roseDeep, fontSize: 14.5, fontWeight: '800' },
   spotBoundAddr: { color: C.inkSoft, fontSize: 12, marginTop: 1 },

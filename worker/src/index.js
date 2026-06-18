@@ -45,6 +45,41 @@ function json(obj, status = 200) {
   });
 }
 
+// 購物點：Google 地圖真實搜尋（Places API New，日韓皆可）
+async function googlePlaces(env, q, country) {
+  if (!env.GOOGLE_MAPS_KEY) return [];
+  const lang = country === 'kr' ? 'ko' : 'ja';
+  const region = country === 'kr' ? 'KR' : 'JP';
+  const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': env.GOOGLE_MAPS_KEY,
+      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.rating',
+    },
+    body: JSON.stringify({ textQuery: q, languageCode: lang, regionCode: region, maxResultCount: 6 }),
+  });
+  const d = await r.json();
+  return (d.places || []).map(p => ({
+    name: (p.displayName && p.displayName.text) || q,
+    address: p.formattedAddress || '',
+    lat: p.location && p.location.latitude, lon: p.location && p.location.longitude,
+    rating: p.rating || null,
+  }));
+}
+// 購物點：Naver 地區搜尋（用既有 Naver 金鑰，僅韓國）
+async function naverLocal(env, q) {
+  const r = await fetch(`https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(q)}&display=6&sort=random`, {
+    headers: { 'X-Naver-Client-Id': env.NAVER_ID, 'X-Naver-Client-Secret': env.NAVER_SECRET },
+  });
+  const d = await r.json();
+  const strip = s => String(s || '').replace(/<[^>]+>/g, '');
+  return (d.items || []).map(it => ({
+    name: strip(it.title), address: it.roadAddress || it.address || '',
+    lat: null, lon: null, rating: null,
+  }));
+}
+
 // 常見台灣客藥妝／伴手禮對照表（綽號/漢字品牌 → 當地搜尋字）
 const JP_DICT = {
   '合利他命': 'アリナミンEX', '合力他命': 'アリナミンEX',
@@ -472,23 +507,16 @@ export default {
       const [jpy, krw] = await Promise.all([rate('JPY'), rate('KRW')]);
       return json({ ok: true, jpy: jpy || FALLBACK_RATE.JPY, krw: krw || FALLBACK_RATE.KRW });
     }
-    // 購物點地點搜尋：用免金鑰的 OpenStreetMap/Photon 找店家，回名稱+地址+座標
+    // 購物點地點搜尋：依所選地圖回真實結果（Google Places／Naver 地區搜尋）
     if (url.pathname === '/places') {
       const q = (url.searchParams.get('q') || '').trim();
       const country = url.searchParams.get('country') === 'kr' ? 'kr' : 'jp';
+      const provider = url.searchParams.get('provider') === 'naver' ? 'naver' : 'google';
       if (q.length < 2) return json({ ok: true, results: [] });
-      const cc = country === 'kr' ? 'KR' : 'JP';
       try {
-        const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8`, { headers: { 'User-Agent': 'travel-shopping-list/1.0 (price compare app)' } });
-        const d = await r.json();
-        const out = (d.features || []).map(f => {
-          const p = f.properties || {}; const co = (f.geometry && f.geometry.coordinates) || [];
-          const addr = [p.street, p.district, p.city, p.state, p.country].filter(Boolean).join(', ');
-          return { name: p.name || p.street || q, address: addr, lat: co[1], lon: co[0], cc: p.countrycode || '' };
-        }).filter(x => x.name && x.lat != null);
-        const inCc = out.filter(x => x.cc === cc);
-        return json({ ok: true, results: (inCc.length ? inCc : out).slice(0, 6) });
-      } catch (e) { return json({ ok: true, results: [] }); }
+        const results = provider === 'naver' ? await naverLocal(env, q) : await googlePlaces(env, q, country);
+        return json({ ok: true, results });
+      } catch (e) { return json({ ok: true, results: [], error: String(e).slice(0, 120) }); }
     }
     // 候選清單標題快速翻成繁中（picker 用，一次翻一批）
     if (url.pathname === '/translate') {
