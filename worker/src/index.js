@@ -340,16 +340,17 @@ async function genCandidates(env, country) {
   const region = country === 'kr' ? '韓國' : '日本';
   const langWord = country === 'kr' ? '韓文' : '日文';
   const prompt =
-    `列出 ${region} 目前最受台灣遊客歡迎、社群（小紅書/Dcard/YouTube/IG）討論度高的必買商品 15 個，` +
-    `涵蓋「美妝・保養」「藥妝・保健」「零食・食品」三類。只回 JSON 陣列，每筆格式：` +
-    `{"zh":"繁體中文商品名(品牌+品名)","term":"當地${langWord}搜尋關鍵字","c":"分類(三選一：美妝・保養 / 藥妝・保健 / 零食・食品)","e":"分類emoji(💄/💊/🍫 擇一)",` +
-    `"info":"客觀說明這是什麼類型的產品與主要用途，一句話約40字，不要提國籍產地","usage":"使用方式；食品就寫口味或食用方式，約40字","claim":"主打效果與產品特色，約80字，用詞中性正面、避免誇大療效或負面字眼"}。` +
+    `列出 ${region} 目前最受台灣遊客歡迎、社群（小紅書/Dcard/YouTube/IG）討論度高的必買商品 24 個，` +
+    `涵蓋「美妝・保養」「藥妝・保健」「零食・食品」三類。` +
+    `重要：熱門品牌請把它「最紅的 2~3 個不同品項」各自獨立列出（例：numbuzin 要分防曬精華、數字面膜、3號精華；medicube 分膠原精華、紅光面膜、毛孔墊片；DHC 分卸妝油、藍莓、葉黃素），不要一個品牌只放一筆。` +
+    `只回 JSON 陣列，每筆格式（先不要寫文案，文案發布時另外補）：` +
+    `{"zh":"繁體中文商品名(品牌+具體品項，例 numbuzin 無濾鏡防曬精華)","term":"當地${langWord}搜尋關鍵字(品牌+品項)","c":"分類(三選一：美妝・保養 / 藥妝・保健 / 零食・食品)","e":"分類emoji(💄/💊/🍫 擇一)"}。` +
     `挑真正當紅、觀光客會買的，不要冷門或在地限定品。只回 JSON 陣列，不要多餘文字、不要 markdown。`;
-  const oa = await openaiChat(env, prompt, 3000, 'gpt-4o-mini');
+  const oa = await openaiChat(env, prompt, 2000, 'gpt-4o-mini');
   let arr = [];
   try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
-  arr = arr.filter(x => x && x.zh && x.term).slice(0, 18);
-  // 每品取「真的查得到的商品圖」(KR=Naver、JP=樂天)，沒圖不上架
+  arr = arr.filter(x => x && x.zh && x.term).slice(0, 26);
+  // 每品取「真的查得到的商品圖」(KR=Naver、JP=樂天)，沒圖不上架。文案留空→發布時 enrich 分批補
   const out = [];
   for (const it of arr) {
     let image = '';
@@ -406,6 +407,14 @@ async function enrichPublished(env, country) {
   await env.POPULAR_KV.put(KV_PUBLISHED, JSON.stringify(pub));
   return { country, kept: kept.length, total: list.length };
 }
+// 把候選池整批發布成 published（再 enrich 補文案）
+async function publishCandidates(env, country) {
+  const cand = await kvGetJSON(env, KV_CANDIDATES, { jp: [], kr: [] });
+  const pub = await kvGetJSON(env, KV_PUBLISHED, { jp: [], kr: [] });
+  pub[country] = (cand[country] || []).map(x => ({ ...x }));
+  await env.POPULAR_KV.put(KV_PUBLISHED, JSON.stringify(pub));
+  return await enrichPublished(env, country);
+}
 async function refreshCandidates(env) {
   const [jp, kr] = await Promise.all([genCandidates(env, 'jp'), genCandidates(env, 'kr')]);
   const data = { jp, kr, updatedAt: new Date().toISOString().slice(0, 10) };
@@ -458,6 +467,12 @@ export default {
       if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
       const c = url.searchParams.get('country') === 'jp' ? 'jp' : 'kr';
       return json({ ok: true, ...(await enrichPublished(env, c)) });
+    }
+    // 一鍵把候選池發布成 published（並補文案）
+    if (url.pathname === '/admin/publish') {
+      if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
+      const c = url.searchParams.get('country') === 'jp' ? 'jp' : 'kr';
+      return json({ ok: true, ...(await publishCandidates(env, c)) });
     }
     if (url.pathname === '/vision') {
       if (request.method !== 'POST') return json({ ok: false, error: 'POST image' }, 405);
