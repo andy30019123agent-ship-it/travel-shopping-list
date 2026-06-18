@@ -420,6 +420,8 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
         <div class="field"><label>主打效果</label><textarea x-model="it.claim"></textarea></div>
         <div class="iact">
          <input type="checkbox" class="chk" :checked="sel[it._id]" @change="sel[it._id]=!sel[it._id]">
+         <input type="file" accept="image/*" :id="'fi'+it._id" @change="uploadImg(it,$event)" style="display:none">
+         <button class="ghost sm" @click="document.getElementById('fi'+it._id).click()" :disabled="it._busy">⬆️ 上傳圖</button>
          <button class="ghost sm" @click="refreshImg(it)" :disabled="it._busy">🖼️ 重抓圖</button>
          <button class="ghost sm" @click="regen(it)" :disabled="it._busy">✨ AI文案</button>
          <button class="ghost sm" @click="preview(it)">👁️ 預覽</button>
@@ -589,6 +591,13 @@ function admin(){return{
  addPicked(){var s=this,b=this.brandPick.brand,n=this.pickCount();if(!n){alert('請至少勾一筆');return}
   this.brandPick.items.forEach(function(it){if(it._sel){var o=Object.assign({},it);delete o._sel;o._id=s.uid++;o._new=true;o.brand=o.brand||b;o.d=o.info||o.d||'';s.list().push(o)}});
   s.expand[b]=true;s.dirty=true;s.brandPick=null;s.flash('已加入 '+n+' 筆「'+b+'」品項');
+ },
+ uploadImg(it,ev){var s=this;var file=ev.target.files&&ev.target.files[0];if(!file)return;it._busy=true;
+  var rd=new FileReader();rd.onload=function(){var img=new Image();
+   img.onload=function(){var max=800,w=img.width,h=img.height;if(w>h&&w>max){h=Math.round(h*max/w);w=max}else if(h>=w&&h>max){w=Math.round(w*max/h);h=max}
+    var cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);var data=cv.toDataURL('image/jpeg',0.82);
+    fetch('/admin/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:s.token,data:data,ct:'image/jpeg'})}).then(function(r){return r.json()}).then(function(d){it._busy=false;ev.target.value='';if(d.ok&&d.url){it.image=d.url;s.dirty=true;s.flash('圖片已上傳 ✅')}else alert('上傳失敗：'+(d.error||''))}).catch(function(){it._busy=false;alert('連線失敗')});
+   };img.onerror=function(){it._busy=false;alert('圖片讀取失敗')};img.src=rd.result};rd.readAsDataURL(file);
  },
  refreshImg(it){var s=this;if(!it.term){alert('先填關鍵字');return}it._busy=true;
   s.api('/admin/refreshimg?country='+s.cur+'&term='+encodeURIComponent(it.term)).then(function(r){return r.json()}).then(function(d){
@@ -811,6 +820,13 @@ export default {
       const r = await fetch(`https://maps.googleapis.com/maps/api/staticmap?${p.toString()}`);
       return new Response(r.body, { status: r.status, headers: { 'Content-Type': r.headers.get('content-type') || 'image/png', 'Cache-Control': 'public, max-age=86400', ...CORS } });
     }
+    // 提供後台上傳的商品圖（存在 KV，公開讀取）
+    if (url.pathname.startsWith('/img/')) {
+      const id = url.pathname.slice(5);
+      const { value, metadata } = await env.POPULAR_KV.getWithMetadata('usrimg_' + id, { type: 'arrayBuffer' });
+      if (!value) return new Response('not found', { status: 404, headers: CORS });
+      return new Response(value, { headers: { 'Content-Type': (metadata && metadata.ct) || 'image/jpeg', 'Cache-Control': 'public, max-age=31536000', ...CORS } });
+    }
     // 購物點：解析貼上的地圖短連結 → {名稱,地址,座標,url}
     if (url.pathname === '/resolveplace') {
       const link = (url.searchParams.get('url') || '').trim();
@@ -886,6 +902,22 @@ export default {
       if (!name) return json({ ok: false, error: 'missing name' }, 400);
       try { return json({ ok: true, item: await aiFillOne(env, c, brand, name, withImage) }); }
       catch (e) { return json({ ok: false, error: String(e).slice(0, 120) }); }
+    }
+    // 後台：上傳商品圖（存 KV，回公開 URL；App 端只存 URL 不塞 base64）
+    if (url.pathname === '/admin/upload') {
+      if (request.method !== 'POST') return json({ ok: false }, 405);
+      let body = {}; try { body = await request.json(); } catch {}
+      if (!okAdmin(env, body.token)) return json({ ok: false, error: 'unauthorized' }, 401);
+      const b64 = (body.data || '').replace(/^data:[^,]+,/, '');
+      if (!b64) return json({ ok: false, error: 'no image' });
+      const ct = body.ct || 'image/jpeg';
+      try {
+        const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        if (bytes.length > 6_000_000) return json({ ok: false, error: 'too large' });
+        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        await env.POPULAR_KV.put('usrimg_' + id, bytes, { metadata: { ct } });
+        return json({ ok: true, url: new URL(request.url).origin + '/img/' + id });
+      } catch (e) { return json({ ok: false, error: String(e).slice(0, 120) }); }
     }
     // 後台：單品重抓圖（智慧選圖）→ 回 {image}
     if (url.pathname === '/admin/refreshimg') {
