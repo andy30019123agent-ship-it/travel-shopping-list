@@ -839,7 +839,8 @@ export default function App() {
           <View style={styles.storeModal}>
             <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 540 }}>
               {popInfo?.image ? <Image source={{ uri: popInfo.image }} style={styles.popInfoImg} resizeMode="contain" /> : <Text style={styles.popInfoEmoji}>{popInfo?.e || '🛍️'}</Text>}
-              <Text style={styles.popInfoName}>{popInfo?.zh}</Text>
+              {popInfo?.brand ? <Text style={styles.popInfoBrand}>{popInfo.brand}</Text> : null}
+              <Text style={styles.popInfoName}>{popInfo?.brand ? stripBrand(popInfo.zh, popInfo.brand) : popInfo?.zh}</Text>
               {(popInfo?.info || popInfo?.d) ? <><Text style={styles.sectionLabel}>關於這個</Text><Text style={styles.infoText}>{popInfo.info || popInfo.d}</Text></> : null}
               {popInfo?.claim ? (
                 <View style={styles.claimCard}>
@@ -1338,7 +1339,8 @@ const styles = StyleSheet.create({
   disclaimBannerTxt: { flex: 1, color: '#8A6420', fontSize: 12, fontWeight: '700', lineHeight: 16 },
   popInfoEmoji: { fontSize: 40, textAlign: 'center', marginTop: 8 },
   popInfoImg: { width: '100%', height: 168, borderRadius: 16, backgroundColor: C.bg },
-  popInfoName: { fontSize: 19, fontWeight: '900', color: C.ink, textAlign: 'center', marginTop: 10, lineHeight: 25 },
+  popInfoBrand: { fontSize: 12.5, fontWeight: '800', color: C.roseDeep, textAlign: 'center', marginTop: 10, letterSpacing: 0.3 },
+  popInfoName: { fontSize: 19, fontWeight: '900', color: C.ink, textAlign: 'center', marginTop: 3, lineHeight: 25 },
   scanAskHint: { color: C.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
   aiTipEmoji: { fontSize: 36, textAlign: 'center', marginBottom: 4 },
   aiTipTitle: { fontSize: 18, fontWeight: '900', color: C.ink, textAlign: 'center', marginBottom: 8 },
