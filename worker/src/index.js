@@ -138,9 +138,10 @@ async function openaiChat(env, content, max_tokens = 50, model = 'gpt-4o-mini') 
 
 // AI：把中文商品名翻成當地語言的搜尋關鍵字（候選來自搜尋結果，不必多個關鍵字）
 async function guessTerms(env, item, country) {
-  // 輸入含「品項詞」時(品牌+品項)跳過對照表短路，交給 AI 才能同時保留品牌與品項；純品牌/綽號才用對照表
-  const hasProductType = /護唇膏|唇膏|面膜|精華|安瓶|防曬|卸妝|化妝水|化粧水|爽膚水|爽膚|乳液|乳霜|面霜|精華液|洗面|洗顏|洗顔|眼霜|身體乳|護手霜|喉糖|眼藥水|止痛|胃散|軟膏|牙膏|洗髮|潤髮|香水|粉底|氣墊|腮紅|口紅|脣膏|眼影|睫毛|遮瑕|蜜粉|爽身|凝露|凝霜|噴霧|면크림|토너|세럼|크림|마스크/.test(item);
-  const hit = hasProductType ? null : dictLookup(country === 'kr' ? KR_DICT : JP_DICT, item);
+  // 「品牌+品項」(有空格多詞、或含品項詞)時跳過對照表短路→交 AI 才能同時保留品牌與品項；純品牌/綽號(單詞)才用對照表
+  const multiWord = /\s/.test(item.trim());
+  const hasProductType = /護唇膏|唇膏|面膜|精華|安瓶|防曬|卸妝|化妝水|化粧水|爽膚水|爽膚|乳液|乳霜|面霜|精華液|洗面|洗顏|洗顔|眼霜|身體乳|護手霜|喉糖|眼藥水|止痛|胃散|軟膏|牙膏|洗髮|潤髮|香水|粉底|氣墊|腮紅|口紅|脣膏|眼影|睫毛|遮瑕|蜜粉|爽身|凝露|凝霜|噴霧|唇膜|紅蔘|紅參|면크림|토너|세럼|크림|마스크/.test(item);
+  const hit = (multiWord || hasProductType) ? null : dictLookup(country === 'kr' ? KR_DICT : JP_DICT, item);
   if (hit) return [hit];
   const lang = country === 'kr' ? 'Korean' : 'Japanese';
   const hint = country === 'kr'
