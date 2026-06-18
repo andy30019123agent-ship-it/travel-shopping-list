@@ -310,6 +310,15 @@ export default function App() {
     fetch(`${WORKER_URL}/rate`).then(r => r.json()).then(d => { if (d.ok) setRates({ jpy: d.jpy, krw: d.krw }); }).catch(() => {});
   }, []);
   useEffect(() => { fetch(`${WORKER_URL}/popular`).then(r => r.json()).then(d => { if (d.ok) setRemotePopular({ jp: d.jp || [], kr: d.kr || [] }); }).catch(() => {}); }, []);
+  // picker 開啟時，把候選標題批次翻成繁中（一次一個 AI 呼叫）
+  useEffect(() => {
+    if (!picker || picker.trans || !(picker.candidates && picker.candidates.length)) return;
+    const titles = picker.candidates.map(c => c.title);
+    fetch(`${WORKER_URL}/translate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ titles }) })
+      .then(r => r.json()).then(d => {
+        if (d.ok && Array.isArray(d.zh)) { const map = {}; titles.forEach((t, i) => { if (d.zh[i]) map[t] = d.zh[i]; }); setPicker(p => p ? { ...p, trans: map } : p); }
+      }).catch(() => {});
+  }, [picker]);
   useEffect(() => { if (loaded) AsyncStorage.setItem(STORE_KEY, JSON.stringify(items)); }, [items, loaded]);
   useEffect(() => { if (settingsLoaded) AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ country, sort, stores, budget, onboardSeen: !onboard, aiTipSeen })); }, [country, sort, stores, budget, onboard, aiTipSeen, settingsLoaded]);
 
@@ -777,7 +786,6 @@ export default function App() {
               <Text style={styles.scanLabel}>商品名稱（可修改）</Text>
               <TextInput style={styles.storeInput} value={scanResult?.name} placeholder="商品名稱" placeholderTextColor="#cdbdb0" onChangeText={t => setScanResult(s => ({ ...s, name: t }))} />
               {scanResult?.info ? <View style={styles.scanInfoBox}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.scanInfo}>{scanResult.info}</Text></View> : null}
-              {scanResult?.usage ? <View style={styles.scanInfoBox}><Ionicons name="color-wand-outline" size={15} color={C.gold} /><Text style={styles.scanInfo}>{scanResult.usage}</Text></View> : null}
               {scanResult?.claim ? (
                 <View style={styles.claimBox}>
                   <Text style={styles.claimLabel}>✨ 主打效果（廠商宣稱／社群分享）</Text>
@@ -821,7 +829,6 @@ export default function App() {
               {popInfo?.image ? <Image source={{ uri: popInfo.image }} style={styles.popInfoImg} resizeMode="contain" /> : <Text style={styles.popInfoEmoji}>{popInfo?.e || '🛍️'}</Text>}
               <Text style={styles.popInfoName}>{popInfo?.zh}</Text>
               {(popInfo?.info || popInfo?.d) ? <View style={styles.scanInfoBox}><Ionicons name="information-circle" size={15} color={C.gold} /><Text style={styles.scanInfo}>{popInfo.info || popInfo.d}</Text></View> : null}
-              {popInfo?.usage ? <View style={styles.scanInfoBox}><Ionicons name="color-wand-outline" size={15} color={C.gold} /><Text style={styles.scanInfo}>{popInfo.usage}</Text></View> : null}
               {popInfo?.claim ? (
                 <View style={styles.claimBox}>
                   <Text style={styles.claimLabel}>✨ 主打效果（廠商宣稱／社群分享）</Text>
@@ -883,7 +890,7 @@ export default function App() {
               {(picker?.candidates || []).map((c, i) => (
                 <TouchableOpacity key={i} style={styles.cand} onPress={() => choosePick(c)} activeOpacity={0.7}>
                   {c.image ? <TouchableOpacity onPress={() => setZoom({ url: c.image })} activeOpacity={0.8}><Image source={{ uri: c.image }} style={styles.candImg} /></TouchableOpacity> : <View style={styles.candImg} />}
-                  <View style={{ flex: 1 }}><Text style={styles.candTitle} numberOfLines={2}>{c.title}</Text><Text style={styles.candPrice}>{picker.currency}{fmt(c.price)}<Text style={styles.candTwd}>　NT${fmt(c.twd)}</Text></Text></View>
+                  <View style={{ flex: 1 }}><Text style={styles.candTitle} numberOfLines={2}>{c.title}</Text>{picker.trans?.[c.title] ? <Text style={styles.candTrans} numberOfLines={1}>🔁 {picker.trans[c.title]}</Text> : null}<Text style={styles.candPrice}>{picker.currency}{fmt(c.price)}<Text style={styles.candTwd}>　NT${fmt(c.twd)}</Text></Text></View>
                   <View style={styles.candPick}><Text style={styles.candPickTxt}>選</Text></View>
                 </TouchableOpacity>
               ))}
@@ -910,30 +917,27 @@ export default function App() {
               {popGroups.map(g => (
                 <View key={g.c} style={{ marginBottom: 16 }}>
                   <Text style={styles.popCat}>{g.e} {g.c}</Text>
-                  {groupByBrand(g.list).map((bg, bi) => (
-                    bg.brand && bg.items.length >= 2 ? (
-                      <View key={bg.brand} style={styles.brandGroup}>
-                        <Text style={styles.brandName}>{bg.brand}</Text>
+                  {groupByBrand(g.list).map((bg, bi) => {
+                    const grouped = bg.brand && bg.items.length >= 2;
+                    return (
+                      <View key={bg.brand || ('s' + bi)} style={grouped ? styles.brandGroup : null}>
+                        {grouped && (
+                          <View style={styles.brandHead}>
+                            <Text style={styles.brandName}>{bg.brand}</Text>
+                            <TouchableOpacity onPress={() => openUrl(`https://www.google.com/search?q=${encodeURIComponent(bg.brand + ' 熱門 推薦')}`)} hitSlop={8} activeOpacity={0.7}><Text style={styles.brandMore}>了解更多 ›</Text></TouchableOpacity>
+                          </View>
+                        )}
                         <View style={styles.popWrap}>
                           {bg.items.map(p => (
-                            <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`加入 ${p.zh}`}>
-                              <Text style={styles.popChipTxt}>{stripBrand(p.zh, bg.brand)}</Text>
-                              <Ionicons name="add" size={15} color={C.roseDeep} />
+                            <TouchableOpacity key={p.zh} style={styles.popCard} onPress={() => addPopular(p)} activeOpacity={0.85} accessibilityLabel={`查看 ${p.zh}`}>
+                              {p.image ? <Image source={{ uri: p.image }} style={styles.popThumb} /> : <View style={[styles.popThumb, styles.popThumbEmpty]}><Ionicons name="image-outline" size={20} color={C.muted} /></View>}
+                              <Text style={styles.popCardTxt} numberOfLines={2}>{grouped ? stripBrand(p.zh, bg.brand) : p.zh}</Text>
                             </TouchableOpacity>
                           ))}
                         </View>
                       </View>
-                    ) : (
-                      <View key={'s' + bi} style={styles.popWrap}>
-                        {bg.items.map(p => (
-                          <TouchableOpacity key={p.zh} style={styles.popChip} onPress={() => addPopular(p)} activeOpacity={0.8} accessibilityLabel={`加入 ${p.zh}`}>
-                            <Text style={styles.popChipTxt}>{p.zh}</Text>
-                            <Ionicons name="add" size={15} color={C.roseDeep} />
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )
-                  ))}
+                    );
+                  })}
                 </View>
               ))}
               <Text style={styles.popHint}>點一下會先看產品介紹，再決定要不要加入比價</Text>
@@ -1183,8 +1187,14 @@ const styles = StyleSheet.create({
 
   popCat: { color: C.inkSoft, fontSize: 13, fontWeight: '800', marginBottom: 9 },
   brandGroup: { marginBottom: 10, paddingLeft: 4, borderLeftWidth: 2, borderLeftColor: C.roseSoft },
-  brandName: { color: C.roseDeep, fontSize: 12.5, fontWeight: '900', marginBottom: 6, marginLeft: 4 },
-  popWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  brandHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginLeft: 4 },
+  brandName: { color: C.roseDeep, fontSize: 12.5, fontWeight: '900' },
+  brandMore: { color: C.muted, fontSize: 11.5, fontWeight: '700' },
+  popWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 11, marginBottom: 8 },
+  popCard: { width: 96 },
+  popThumb: { width: 96, height: 96, borderRadius: 14, backgroundColor: C.bg },
+  popThumbEmpty: { alignItems: 'center', justifyContent: 'center' },
+  popCardTxt: { color: C.ink, fontSize: 11.5, fontWeight: '600', lineHeight: 15, marginTop: 5 },
   popChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.roseSoft, borderRadius: 999, paddingLeft: 13, paddingRight: 9, paddingVertical: 9 },
   popChipTxt: { color: C.roseDeep, fontSize: 13.5, fontWeight: '700' },
   popHint: { color: C.muted, fontSize: 12, textAlign: 'center', marginTop: 2, marginBottom: 6 },
@@ -1321,6 +1331,7 @@ const styles = StyleSheet.create({
   cand: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: C.line },
   candImg: { width: 56, height: 56, borderRadius: 12, backgroundColor: C.bg },
   candTitle: { color: C.ink, fontSize: 14, fontWeight: '600', lineHeight: 19 },
+  candTrans: { color: C.roseDeep, fontSize: 12, marginTop: 2 },
   candPrice: { color: C.inkSoft, fontSize: 14, fontWeight: '700', marginTop: 4, fontFamily: MONO },
   candTwd: { color: C.rose, fontSize: 14, fontWeight: '800', fontFamily: MONO },
   candPick: { backgroundColor: C.roseSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },

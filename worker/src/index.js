@@ -10,17 +10,24 @@ const RAKUTEN_APP_ID = '3ec6041d-d772-4a05-861a-9d15ec64dafa';
 const RAKUTEN_ACCESS_KEY = 'pk_SuWs3ZCwNcFZS14BLH8QbOcDkOOBMKlyDRp7L3a2ANN';
 // 取樂天該關鍵字第一筆商品的圖與價（worker 端帶 Referer 即可，實測可用）
 async function rakutenFirst(term) {
-  try {
-    const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
-      `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${encodeURIComponent(term)}&hits=3&format=json`;
-    const r = await fetch(url, { headers: { Referer: RAKUTEN_REFERER, Origin: RAKUTEN_REFERER.replace(/\/$/, '') } });
-    if (!r.ok) return null;
-    const j = await r.json();
-    const it = (j.Items || [])[0]?.Item || (j.Items || [])[0];
-    if (!it) return null;
-    const img = it.mediumImageUrls?.[0]?.imageUrl || it.mediumImageUrls?.[0] || it.imageUrl || '';
-    return { image: (img || '').replace(/\?_ex=\d+x\d+$/, ''), price: it.itemPrice || 0 };
-  } catch { return null; }
+  const url = `https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401` +
+    `?applicationId=${RAKUTEN_APP_ID}&accessKey=${RAKUTEN_ACCESS_KEY}&keyword=${encodeURIComponent(term)}&hits=3&format=json`;
+  // 樂天有每秒限流，連續多筆會被擋→失敗重試一次
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(url, { headers: { Referer: RAKUTEN_REFERER, Origin: RAKUTEN_REFERER.replace(/\/$/, '') } });
+      if (r.ok) {
+        const j = await r.json();
+        const it = (j.Items || [])[0]?.Item || (j.Items || [])[0];
+        if (it) {
+          const img = it.mediumImageUrls?.[0]?.imageUrl || it.mediumImageUrls?.[0] || it.imageUrl || '';
+          if (img) return { image: img.replace(/\?_ex=\d+x\d+$/, ''), price: it.itemPrice || 0 };
+        }
+      }
+    } catch {}
+    await new Promise(res => setTimeout(res, 300));
+  }
+  return null;
 }
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -271,6 +278,7 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="zh-Hant"><head>
  <div id="app" style="display:none">
   <div class="tabs"><div class="tab on" id="t-jp" onclick="sw('jp')">🇯🇵 日本</div><div class="tab" id="t-kr" onclick="sw('kr')">🇰🇷 韓國</div></div>
   <button class="ghost sm" onclick="add()">＋ 新增一筆</button>
+  <button class="sm" onclick="addBrand(this)">＋ 新增品牌(自動找品項)</button>
   <div id="list"></div>
   <h3>🤖 自動候選池 <span class="muted" id="candtime"></span></h3>
   <div class="muted">每週自動更新，點「加入」放進上方發布清單</div>
@@ -318,6 +326,17 @@ function render(){
  document.getElementById('candtime').textContent=DATA.candidates.updatedAt?('更新於 '+DATA.candidates.updatedAt):'';
 }
 function add(){DATA.published[CUR].push({brand:'',zh:'',term:'',c:'',e:'🛍️',d:'',image:''});render()}
+function addBrand(btn){
+ var b=prompt('輸入品牌名稱（例 numbuzin、DHC、Anua）：');if(!b)return;
+ var o=btn.textContent;btn.textContent='搜尋中…';btn.disabled=true;
+ fetch('/admin/brandfill?token='+encodeURIComponent(TOKEN)+'&country='+CUR+'&brand='+encodeURIComponent(b)).then(function(r){return r.json()}).then(function(d){
+  btn.textContent=o;btn.disabled=false;
+  if(!d.ok){alert('失敗');return}
+  if(!d.items||!d.items.length){alert('找不到該品牌的熱門品項（可能查無圖）');return}
+  DATA.published[CUR]=DATA.published[CUR].concat(d.items);render();
+  alert('已加入 '+d.items.length+' 個「'+b+'」品項，記得按下方「儲存發布清單」');
+ }).catch(function(){btn.textContent=o;btn.disabled=false;alert('連線失敗')});
+}
 function save(){
  fetch('/admin/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,jp:DATA.published.jp,kr:DATA.published.kr})})
  .then(function(r){return r.json()}).then(function(d){alert(d.ok?'已儲存 ✅ App 重新整理即生效':'儲存失敗')}).catch(function(){alert('連線失敗')});
@@ -387,7 +406,7 @@ async function enrichPublished(env, country) {
   for (let i = 0; i < need.length; i += 8) {
     const chunk = need.slice(i, i + 8);
     const prompt = `為以下商品各寫產品文案，只回 JSON 陣列、順序與輸入相同，每筆：` +
-      `{"zh":"原商品名","info":"客觀說明這是什麼與主要用途，約40字，不提國籍產地","usage":"使用或食用方式，約40字","claim":"主打效果與特色，約80字，用詞中性、避免誇大療效"}。` +
+      `{"zh":"原商品名","info":"客觀說明這是什麼與主要用途，約40字，不提國籍產地","claim":"主打效果與特色，約80字，用詞中性、避免誇大療效"}。` +
       `商品清單：${JSON.stringify(chunk.map(it => it.zh))}。只回 JSON 陣列，不要 markdown。`;
     const oa = await openaiChat(env, prompt, 2200, 'gpt-4o-mini');
     let arr = [];
@@ -397,7 +416,6 @@ async function enrichPublished(env, country) {
     chunk.forEach((it, idx) => {
       const r = byName[it.zh] || arr[idx] || {};
       it.info = (r.info || '').trim().slice(0, 100);
-      it.usage = (r.usage || '').trim().slice(0, 100);
       it.claim = (r.claim || '').trim().slice(0, 200);
       it.d = it.info;
     });
@@ -405,6 +423,31 @@ async function enrichPublished(env, country) {
   pub[country] = kept;
   await env.POPULAR_KV.put(KV_PUBLISHED, JSON.stringify(pub));
   return { country, kept: kept.length, total: list.length };
+}
+// 後台「新增品牌」用：給品牌名→列出該牌熱門品項+取圖+文案
+async function brandProducts(env, country, brand) {
+  const region = country === 'kr' ? '韓國' : '日本';
+  const langWord = country === 'kr' ? '韓文' : '日文';
+  const prompt = `「${brand}」這個品牌在 ${region} 最受台灣遊客歡迎、最該買的 6 個熱門品項。只回 JSON 陣列，每筆：` +
+    `{"zh":"繁中商品名(品牌+具體品項)","term":"當地${langWord}搜尋關鍵字(品牌+品項)","c":"分類(美妝・保養 / 藥妝・保健 / 零食・食品 三選一)","e":"分類emoji(💄/💊/🍫)"}。只回 JSON、不要 markdown。`;
+  const oa = await openaiChat(env, prompt, 900, 'gpt-4.1-mini');
+  let arr = []; try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
+  arr = arr.filter(x => x && x.zh && x.term).slice(0, 8);
+  const items = [];
+  for (const it of arr) {
+    let image = '';
+    try { if (country === 'kr') { const c = await naverCandidates(env, [it.term]); image = c[0]?.image || ''; } else { const r = await rakutenFirst(it.term); image = r?.image || ''; } } catch {}
+    if (!image) continue;
+    items.push({ brand, zh: it.zh, term: it.term, c: it.c || '', e: it.e || '🛍️', image, info: '', claim: '', d: '' });
+  }
+  if (items.length) {
+    const p2 = `為以下商品各寫文案，只回 JSON 陣列、順序相同，每筆 {"zh":"原名","info":"客觀說明這是什麼與主要用途約40字、不提產地","claim":"主打效果與特色約80字、用詞中性避免誇大療效"}。\n${JSON.stringify(items.map(i => i.zh))}`;
+    const oa2 = await openaiChat(env, p2, 2500, 'gpt-4o-mini');
+    let t = []; try { const m = (oa2 || '').match(/\[[\s\S]*\]/); t = m ? JSON.parse(m[0]) : []; } catch {}
+    const by = {}; for (const r of t) if (r && r.zh) by[r.zh] = r;
+    items.forEach((it, i) => { const r = by[it.zh] || t[i] || {}; it.info = (r.info || '').trim().slice(0, 100); it.claim = (r.claim || '').trim().slice(0, 200); it.d = it.info; });
+  }
+  return items;
 }
 // 把候選池整批發布成 published（再 enrich 補文案）
 async function publishCandidates(env, country) {
@@ -428,6 +471,18 @@ export default {
     if (url.pathname === '/rate') {
       const [jpy, krw] = await Promise.all([rate('JPY'), rate('KRW')]);
       return json({ ok: true, jpy: jpy || FALLBACK_RATE.JPY, krw: krw || FALLBACK_RATE.KRW });
+    }
+    // 候選清單標題快速翻成繁中（picker 用，一次翻一批）
+    if (url.pathname === '/translate') {
+      if (request.method !== 'POST') return json({ ok: false }, 405);
+      let body = {}; try { body = await request.json(); } catch {}
+      const titles = (body.titles || []).slice(0, 14).map(t => String(t || '').slice(0, 120));
+      if (!titles.length) return json({ ok: true, zh: [] });
+      const prompt = `把以下韓文/日文商品標題「翻譯成繁體中文」(必須是中文、不可保留原文韓文/日文；品牌名可保留英文)，只取品牌+品名、去掉容量/數量/贈品/促銷等雜訊，每個約 20 字內。只回 JSON 字串陣列、順序與輸入完全相同、長度相同、每個元素是中文翻譯。\n${JSON.stringify(titles)}`;
+      const oa = await openaiChat(env, prompt, 1200, 'gpt-4o-mini');
+      let zh = [];
+      try { const m = (oa || '').match(/\[[\s\S]*\]/); zh = m ? JSON.parse(m[0]) : []; } catch {}
+      return json({ ok: true, zh: Array.isArray(zh) ? zh : [] });
     }
     // App 讀發布的熱門清單；沒有資料時回空陣列（前端會退回內建靜態清單）
     if (url.pathname === '/popular') {
@@ -467,6 +522,14 @@ export default {
       const c = url.searchParams.get('country') === 'jp' ? 'jp' : 'kr';
       return json({ ok: true, ...(await enrichPublished(env, c)) });
     }
+    // 後台「新增品牌」：給品牌名→回該牌熱門品項(含圖文)，前端加進清單
+    if (url.pathname === '/admin/brandfill') {
+      if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
+      const c = url.searchParams.get('country') === 'jp' ? 'jp' : 'kr';
+      const brand = (url.searchParams.get('brand') || '').trim();
+      if (!brand) return json({ ok: false, error: 'missing brand' }, 400);
+      return json({ ok: true, items: await brandProducts(env, c, brand) });
+    }
     // 一鍵把候選池發布成 published（並補文案）
     if (url.pathname === '/admin/publish') {
       if (!okAdmin(env, url.searchParams.get('token'))) return json({ ok: false, error: 'unauthorized' }, 401);
@@ -481,10 +544,10 @@ export default {
         // 限定便宜模型白名單，避免有人對公開端點指定昂貴模型消耗 OpenAI 額度
         const ALLOWED_VISION_MODELS = ['gpt-4.1-nano', 'gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-nano'];
         const visionModel = ALLOWED_VISION_MODELS.includes(body.model) ? body.model : 'gpt-4.1-nano';
-        let name = '', info = '', usage = '', claim = '', oaAnswered = false, uncertain = false;
+        let name = '', info = '', claim = '', oaAnswered = false, uncertain = false;
         // OpenAI 視覺辨識，回 JSON {name, info, usage, claim, confidence}。寧可認不出也不亂猜
         const oa = await openaiChat(env, [
-          { type: 'text', text: '這是台灣遊客想買的商品照片。請只根據「包裝上實際看得到的文字、logo、圖案」辨識，不要憑空推測。\n辨識門檻(很重要)：只有能清楚讀出「具體商品名稱」時才辨識；以下情況一律回 name=UNKNOWN、不要猜——照片模糊或文字看不清、只看到品牌或製造商卻看不到產品名、只讀到通用類別字樣(如「第2類医薬品」「医薬品」「化粧品」這種法規分類不是商品名)。嚴禁從製造商或類別反推產品(看到「大正製薬」不可自己猜成感冒藥)。保健食品/補給品要讀出「成分名」(如藍莓、葉黃素、膠原蛋白、維他命C)才算辨識成功；只讀到品牌＋「營養素/補給品/サプリ/保健食品」這種泛稱，請回 UNKNOWN，不要自己湊一個。\n只回 JSON：{"name":"品牌+品名，簡潔好搜尋(例：numbuzin 無濾鏡提亮防曬精華)；規格(SPF/容量/色號)放 claim 不放 name；讀不到具體商品名就回 UNKNOWN","info":"客觀說明這是什麼類型的產品與主要用途，一句話，不要誇大效果，也不要提及品牌國籍或產地(約40字)","usage":"使用方式；食品就寫口味或食用方式(約40字；無法判斷給空字串)","claim":"主打效果與產品特色：先用「・」列出包裝主打的具體效果(例 SPF50+、保濕提亮)，再用一兩句補充產品特色(質地、適用對象、設計、情境)，約80~100字。用詞中性正面，避免爭議性、誇大療效或負面字眼(無法判斷給空字串)","confidence":"high 或 low：你對 name 是否為正確且具體商品名稱的把握度，只要有任何不確定就回 low"}。格式：各欄位只填內容本身，不要把欄位名稱或冒號寫進值裡。鐵則：產地、國籍、價格、療效、症狀、適應症、成分含量等「包裝上看不到或無法確認」的資訊一律不要編造，看不到就留空字串。繁體中文。不要多餘文字、不要 markdown。' },
+          { type: 'text', text: '這是台灣遊客想買的商品照片。請只根據「包裝上實際看得到的文字、logo、圖案」辨識，不要憑空推測。\n辨識門檻(很重要)：只有能清楚讀出「具體商品名稱」時才辨識；以下情況一律回 name=UNKNOWN、不要猜——照片模糊或文字看不清、只看到品牌或製造商卻看不到產品名、只讀到通用類別字樣(如「第2類医薬品」「医薬品」「化粧品」這種法規分類不是商品名)。嚴禁從製造商或類別反推產品(看到「大正製薬」不可自己猜成感冒藥)。保健食品/補給品要讀出「成分名」(如藍莓、葉黃素、膠原蛋白、維他命C)才算辨識成功；只讀到品牌＋「營養素/補給品/サプリ/保健食品」這種泛稱，請回 UNKNOWN，不要自己湊一個。\n只回 JSON：{"name":"品牌+品名，簡潔好搜尋(例：numbuzin 無濾鏡提亮防曬精華)；規格(SPF/容量/色號)放 claim 不放 name；讀不到具體商品名就回 UNKNOWN","info":"客觀說明這是什麼類型的產品與主要用途，一句話，不要誇大效果，也不要提及品牌國籍或產地(約40字)","claim":"主打效果與產品特色：先用「・」列出包裝主打的具體效果(例 SPF50+、保濕提亮)，再用一兩句補充產品特色(質地、適用對象、設計、情境)，約80~100字。用詞中性正面，避免爭議性、誇大療效或負面字眼(無法判斷給空字串)","confidence":"high 或 low：你對 name 是否為正確且具體商品名稱的把握度，只要有任何不確定就回 low"}。格式：各欄位只填內容本身，不要把欄位名稱或冒號寫進值裡。鐵則：產地、國籍、價格、療效、症狀、適應症、成分含量等「包裝上看不到或無法確認」的資訊一律不要編造，看不到就留空字串。繁體中文。不要多餘文字、不要 markdown。' },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } },
         ], 550, visionModel);
         if (oa) {
@@ -503,7 +566,6 @@ export default {
                 uncertain = true; // 有猜測但沒十足把握 → 前端跳「你要找的是 XXX 嗎」，不附介紹/效果(避免把沒把握的當真)
               } else {
                 info = (obj.info || '').trim().slice(0, 100);
-                usage = (obj.usage || '').trim().slice(0, 100);
                 claim = (obj.claim || '').trim().slice(0, 200);
               }
             }
@@ -521,7 +583,7 @@ export default {
           });
           name = (r.description || r.response || '').trim().split('\n')[0].slice(0, 60);
         }
-        return json({ ok: true, name, info, usage, claim, uncertain });
+        return json({ ok: true, name, info, claim, uncertain });
       } catch (e) { return json({ ok: false, error: String(e.message || e) }, 502); }
     }
     if (url.pathname !== '/price') return json({ ok: false, error: 'use /price?item=..&country=jp|kr' }, 404);
