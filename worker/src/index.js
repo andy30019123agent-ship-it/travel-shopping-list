@@ -193,26 +193,6 @@ function metaContent(html, prop) {
     || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name|itemprop)=["']${prop}["']`, 'i'));
   return m ? m[1].replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim() : '';
 }
-async function extractFromUrl(url) {
-  try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenshuiBot/1.0)' } });
-    if (!r.ok) return {};
-    // 日本網站常用 Shift_JIS / EUC-JP，需依 charset 正確解碼，否則標題會變亂碼
-    const buf = await r.arrayBuffer();
-    let cs = (r.headers.get('content-type') || '').match(/charset=["']?([\w-]+)/i)?.[1];
-    if (!cs) cs = new TextDecoder('latin1').decode(buf.slice(0, 4096)).match(/charset=["']?([\w-]+)/i)?.[1];
-    cs = (cs || 'utf-8').toLowerCase().replace('shift_jis', 'shift-jis');
-    let html;
-    try { html = new TextDecoder(cs).decode(buf); } catch { html = new TextDecoder('utf-8').decode(buf); }
-    let title = metaContent(html, 'og:title');
-    if (!title) { const t = html.match(/<title[^>]*>([^<]+)/i); if (t) title = t[1].replace(/&amp;/g, '&').trim(); }
-    title = title.split(/\s*[|｜\-–—]\s*/)[0].trim();
-    const image = metaContent(html, 'og:image');
-    const priceStr = metaContent(html, 'product:price:amount') || metaContent(html, 'og:price:amount') || metaContent(html, 'price');
-    const price = priceStr ? parseInt(priceStr.replace(/[^\d]/g, '')) : 0;
-    return { title, image, price };
-  } catch { return {}; }
-}
 
 async function rate(from) {
   try {
