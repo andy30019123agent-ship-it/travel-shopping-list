@@ -144,7 +144,7 @@ async function openaiChat(env, content, max_tokens = 50, model = 'gpt-4o-mini') 
 }
 
 // AI：把中文商品名翻成當地語言的搜尋關鍵字（候選來自搜尋結果，不必多個關鍵字）
-async function guessTerms(env, item, country) {
+async function guessTerms(env, item, country, model = 'gpt-4o') {
   // 「品牌+品項」(有空格多詞、或含品項詞)時跳過對照表短路→交 AI 才能同時保留品牌與品項；純品牌/綽號(單詞)才用對照表
   const multiWord = /\s/.test(item.trim());
   const hasProductType = /護唇膏|唇膏|面膜|精華|安瓶|防曬|卸妝|化妝水|化粧水|爽膚水|爽膚|乳液|乳霜|面霜|精華液|洗面|洗顏|洗顔|眼霜|身體乳|護手霜|喉糖|眼藥水|止痛|胃散|軟膏|牙膏|洗髮|潤髮|香水|粉底|氣墊|腮紅|口紅|脣膏|眼影|睫毛|遮瑕|蜜粉|爽身|凝露|凝霜|噴霧|唇膜|紅蔘|紅參|면크림|토너|세럼|크림|마스크/.test(item);
@@ -170,7 +170,7 @@ async function guessTerms(env, item, country) {
     `Reply with ONLY the keyword — no quotes, no romaji, no explanation.\n\nProduct: ${item}`;
   const clean = s => (s || '').trim().split('\n')[0].replace(/^["「『]|["」』]$/g, '').trim();
   // 先用 OpenAI（gpt-4.1-mini 解析品牌+品項較準），失敗或無金鑰再退回 Workers AI llama
-  const oa = await openaiChat(env, prompt, 50, 'gpt-4.1-mini');
+  const oa = await openaiChat(env, prompt, 50, model);
   if (oa) return [clean(oa) || item];
   try {
     const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
@@ -365,7 +365,7 @@ async function genCandidates(env, country) {
     `只回 JSON 陣列、每個品項一筆(同品牌多筆)，每筆格式（先不要寫文案，文案發布時另外補）：` +
     `{"brand":"品牌名(原文/英文，例 numbuzin、medicube、DHC)","zh":"繁中商品名(品牌+具體品項)","term":"當地${langWord}搜尋關鍵字(品牌+品項)","c":"分類(三選一：美妝・保養 / 藥妝・保健 / 零食・食品)","e":"分類emoji(💄/💊/🍫 擇一)"}。` +
     `挑真正當紅、觀光客會買的，不要冷門或在地限定品。只回 JSON 陣列，不要多餘文字、不要 markdown。`;
-  const oa = await openaiChat(env, prompt, 2000, 'gpt-4o-mini');
+  const oa = await openaiChat(env, prompt, 2000, 'gpt-4o');
   let arr = [];
   try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
   arr = arr.filter(x => x && x.zh && x.term).slice(0, 30);
@@ -408,7 +408,7 @@ async function enrichPublished(env, country) {
     const prompt = `為以下商品各寫產品文案，只回 JSON 陣列、順序與輸入相同，每筆：` +
       `{"zh":"原商品名","info":"客觀說明這是什麼與主要用途，約40字，不提國籍產地","claim":"主打效果與特色，約80字，用詞中性、避免誇大療效"}。` +
       `商品清單：${JSON.stringify(chunk.map(it => it.zh))}。只回 JSON 陣列，不要 markdown。`;
-    const oa = await openaiChat(env, prompt, 2200, 'gpt-4o-mini');
+    const oa = await openaiChat(env, prompt, 2200, 'gpt-4o');
     let arr = [];
     try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
     const byName = {};
@@ -430,7 +430,7 @@ async function brandProducts(env, country, brand) {
   const langWord = country === 'kr' ? '韓文' : '日文';
   const prompt = `「${brand}」這個品牌在 ${region} 最受台灣遊客歡迎、最該買的 6 個熱門品項。只回 JSON 陣列，每筆：` +
     `{"zh":"繁中商品名(品牌+具體品項)","term":"當地${langWord}搜尋關鍵字(品牌+品項)","c":"分類(美妝・保養 / 藥妝・保健 / 零食・食品 三選一)","e":"分類emoji(💄/💊/🍫)"}。只回 JSON、不要 markdown。`;
-  const oa = await openaiChat(env, prompt, 900, 'gpt-4.1-mini');
+  const oa = await openaiChat(env, prompt, 900, 'gpt-4o');
   let arr = []; try { const m = (oa || '').match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : []; } catch {}
   arr = arr.filter(x => x && x.zh && x.term).slice(0, 8);
   const items = [];
@@ -442,7 +442,7 @@ async function brandProducts(env, country, brand) {
   }
   if (items.length) {
     const p2 = `為以下商品各寫文案，只回 JSON 陣列、順序相同，每筆 {"zh":"原名","info":"客觀說明這是什麼與主要用途約40字、不提產地","claim":"主打效果與特色約80字、用詞中性避免誇大療效"}。\n${JSON.stringify(items.map(i => i.zh))}`;
-    const oa2 = await openaiChat(env, p2, 2500, 'gpt-4o-mini');
+    const oa2 = await openaiChat(env, p2, 2500, 'gpt-4o');
     let t = []; try { const m = (oa2 || '').match(/\[[\s\S]*\]/); t = m ? JSON.parse(m[0]) : []; } catch {}
     const by = {}; for (const r of t) if (r && r.zh) by[r.zh] = r;
     items.forEach((it, i) => { const r = by[it.zh] || t[i] || {}; it.info = (r.info || '').trim().slice(0, 100); it.claim = (r.claim || '').trim().slice(0, 200); it.d = it.info; });
