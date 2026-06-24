@@ -32,8 +32,10 @@ async function rakutenFirst(term) {
   }
   return null;
 }
+// 只允許自家網域的瀏覽器呼叫（其他站台會被 CORS 擋）。日後換網域要同步更新這行。
+const ALLOW_ORIGIN = 'https://andy30019123agent-ship-it.github.io';
 const CORS = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': ALLOW_ORIGIN,
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
@@ -43,6 +45,22 @@ function json(obj, status = 200) {
     status,
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...CORS },
   });
+}
+
+// 公開付費端點限流：同一 IP 每分鐘最多 RL_MAX 次（跨端點共用），用既有 POPULAR_KV 計數，
+// 防有人狂打 /vision、/price 等燒 OpenAI/Google 額度。KV 異常時 fail-open 不影響正常使用者。
+const RL_MAX = 30;
+const RL_WINDOW = 60;
+async function rateAllow(env, ip) {
+  try {
+    const key = `rl:${ip}:${Math.floor(Date.now() / 1000 / RL_WINDOW)}`;
+    const cur = parseInt((await env.POPULAR_KV.get(key)) || '0', 10);
+    if (cur >= RL_MAX) return false;
+    await env.POPULAR_KV.put(key, String(cur + 1), { expirationTtl: RL_WINDOW * 2 });
+    return true;
+  } catch {
+    return true;
+  }
 }
 
 // 購物點：Google 地圖真實搜尋（Places API New，日韓皆可）
@@ -793,6 +811,13 @@ export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
     const url = new URL(request.url);
+    // 付費端點限流：依來源 IP 計數，擋住被狂打燒 OpenAI/Google 額度
+    const COSTLY = ['/vision', '/price', '/places', '/translate', '/resolveplace', '/staticmap'];
+    if (COSTLY.includes(url.pathname)) {
+      const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+      if (!(await rateAllow(env, ip)))
+        return json({ ok: false, error: '請求過於頻繁，請稍後再試' }, 429);
+    }
     if (url.pathname === '/rate') {
       const [jpy, krw] = await Promise.all([rate('JPY'), rate('KRW')]);
       return json({ ok: true, jpy: jpy || FALLBACK_RATE.JPY, krw: krw || FALLBACK_RATE.KRW });
@@ -940,6 +965,8 @@ export default {
       try {
         const body = await request.json();
         const b64 = (body.image || '').replace(/^data:image\/\w+;base64,/, '');
+        // 大小上限：base64 > 8MB（約圖片 6MB）直接拒，避免灌大圖燒 OpenAI 視覺額度
+        if (b64.length > 8_000_000) return json({ ok: false, error: '圖片過大，請壓縮後再試' }, 413);
         // 限定便宜模型白名單，避免有人對公開端點指定昂貴模型消耗 OpenAI 額度
         const ALLOWED_VISION_MODELS = ['gpt-4.1-nano', 'gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-nano'];
         const visionModel = ALLOWED_VISION_MODELS.includes(body.model) ? body.model : 'gpt-4.1-nano';
