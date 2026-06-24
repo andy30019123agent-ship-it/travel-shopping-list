@@ -4,3 +4,11 @@ dist/
 .DS_Store
 *.log
 npm-debug.*
+
+# 旅程規劃師殘骸備份（停做專案）
+_archive/
+
+# 環境變數（夜間盤點補上）
+.env
+.env.local
+.env*.local
